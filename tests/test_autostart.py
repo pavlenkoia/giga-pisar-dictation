@@ -31,6 +31,12 @@ class FakeWidget:
     def __init__(self, *args, **kwargs): self.text = kwargs.get("label", ""); self.active = False; self.value = 120; self.sensitive = True
     def set_text(self, value): self.text = value
     def get_text(self): return self.text
+    def append(self, item_id, label):
+        if not hasattr(self, "items"): self.items = []
+        self.items.append((item_id, label))
+    def set_active_id(self, item_id):
+        self.active_id = item_id if any(entry_id == item_id for entry_id, _ in getattr(self, "items", [])) else None
+    def get_active_id(self): return getattr(self, "active_id", None)
     def set_visibility(self, _value): pass
     def set_placeholder_text(self, _value): pass
     def set_active(self, value): self.active = value
@@ -70,7 +76,7 @@ class SettingsDialogFallbackTests(unittest.TestCase):
             def save_settings(self, *args, **kwargs): self.saved.append((args, kwargs))
         class Grid(FakeWidget): pass
         class GtkFake:
-            Dialog = FakeSettingsDialog; Label = FakeWidget; Entry = FakeWidget
+            Dialog = FakeSettingsDialog; Label = FakeWidget; Entry = FakeWidget; ComboBoxText = FakeWidget
             SpinButton = type("Spin", (), {"new_with_range": staticmethod(lambda *_: FakeWidget())})
             CheckButton = FakeWidget
             ResponseType = type("Response", (), {"CANCEL": 0, "OK": 1})
@@ -80,7 +86,7 @@ class SettingsDialogFallbackTests(unittest.TestCase):
             effects = Effects(error)
             view = gui.DesktopWindow.__new__(gui.DesktopWindow)
             view.effects = effects; view.window = object(); view.status = FakeWidget()
-            with patch.object(gui, "Gtk", GtkFake):
+            with patch.object(gui, "Gtk", GtkFake), patch.object(gui, "list_audio_sources", return_value=[]):
                 view.settings_dialog()
             self.assertEqual(FakeSettingsDialog.instances[-1].buttons[:2], [("Отменить", 0), ("Сохранить", 1)])
             self.assertEqual(effects.autostart.calls, 1)
@@ -99,12 +105,12 @@ class SettingsDialogFallbackTests(unittest.TestCase):
             def __init__(self): self.saved = []
             def save_settings(self, *args, **kwargs): self.saved.append((args, kwargs))
         class GtkFake:
-            Dialog = FakeSettingsDialog; Grid = FakeWidget; Label = FakeWidget; Entry = FakeWidget
+            Dialog = FakeSettingsDialog; Grid = FakeWidget; Label = FakeWidget; Entry = FakeWidget; ComboBoxText = FakeWidget
             SpinButton = type("Spin", (), {"new_with_range": staticmethod(lambda *_: FakeWidget())})
             CheckButton = FakeWidget; ResponseType = type("Response", (), {"CANCEL": 0, "OK": 1})
         FakeSettingsDialog.response = 0
         view = gui.DesktopWindow.__new__(gui.DesktopWindow); view.effects = Effects(); view.window = object(); view.status = FakeWidget()
-        with patch.object(gui, "Gtk", GtkFake): view.settings_dialog()
+        with patch.object(gui, "Gtk", GtkFake), patch.object(gui, "list_audio_sources", return_value=[]): view.settings_dialog()
         self.assertEqual(view.effects.saved, [])
 
 

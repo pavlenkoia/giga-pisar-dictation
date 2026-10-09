@@ -3,6 +3,7 @@ import gi
 gi.require_version("Gtk", "3.0"); gi.require_version("Gdk", "3.0")
 from gi.repository import Gtk, Gdk, GLib
 from .controller import State
+from .audio_devices import list_audio_sources
 from .tray import TrayPolicy, TrayWatcher, icon_for_state, requires_quit_confirmation
 
 
@@ -196,7 +197,20 @@ class DesktopWindow:
         shortcut_state = Gtk.Label(label=self.effects.shortcut_status)
         url = Gtk.Entry(); url.set_text(self.effects.config.base_url)
         timeout = Gtk.SpinButton.new_with_range(1, 3600, 1); timeout.set_value(self.effects.config.timeout_seconds)
-        source = Gtk.Entry(); source.set_text(self.effects.config.audio_source)
+        source = Gtk.ComboBoxText()
+        source.append("", "Системный по умолчанию")
+        source_error = None
+        try:
+            audio_sources = list_audio_sources()
+        except Exception:
+            audio_sources = []
+            source_error = Gtk.Label(label="Не удалось получить список микрофонов; текущая настройка сохранена.")
+        current_source = self.effects.config.audio_source
+        for device_id, display_name in audio_sources:
+            source.append(device_id, display_name)
+        if current_source and current_source not in {device_id for device_id, _ in audio_sources}:
+            source.append(current_source, "Недоступный микрофон")
+        source.set_active_id(current_source)
         key = Gtk.Entry(); key.set_visibility(False); key.set_placeholder_text("Оставьте пустым, чтобы сохранить прежний ключ")
         auto = Gtk.CheckButton(label="Вставлять автоматически только в исходное активное окно X11")
         auto.set_active(self.effects.config.auto_insert)
@@ -206,7 +220,10 @@ class DesktopWindow:
         hotkey_enabled = Gtk.CheckButton(label="Включить глобальную клавишу X11")
         hotkey_enabled.set_active(self.effects.config.hotkey_enabled)
         hotkey = Gtk.Entry(); hotkey.set_text(self.effects.config.hotkey_accelerator)
-        settings_rows = [("Состояние клавиши", shortcut_state), ("Базовый URL API", url), ("Тайм-аут (секунды)", timeout), ("Источник аудио", source), ("Ключ API", key), ("", auto), ("", autostart)]
+        settings_rows = [("Состояние клавиши", shortcut_state), ("Базовый URL API", url), ("Тайм-аут (секунды)", timeout), ("Микрофон", source)]
+        if source_error:
+            settings_rows.append(("", source_error))
+        settings_rows.extend((("Ключ API", key), ("", auto), ("", autostart)))
         if not autostart_available:
             settings_rows.append(("", Gtk.Label(label="Не удалось проверить автозапуск; его состояние не изменено.")))
         settings_rows.extend((("", hotkey_enabled), ("Клавиша (например, Ctrl+Space)", hotkey)))
@@ -214,7 +231,7 @@ class DesktopWindow:
             grid.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1); grid.attach(widget, 1, row, 1, 1)
         dialog.get_content_area().add(grid); dialog.show_all()
         if dialog.run() == Gtk.ResponseType.OK:
-            try: self.effects.save_settings(url.get_text(), timeout.get_value_as_int(), source.get_text(), key.get_text(), auto.get_active(), hotkey_enabled.get_active(), hotkey.get_text(), autostart_enabled=autostart.get_active() if autostart_available else None)
+            try: self.effects.save_settings(url.get_text(), timeout.get_value_as_int(), source.get_active_id() or "", key.get_text(), auto.get_active(), hotkey_enabled.get_active(), hotkey.get_text(), autostart_enabled=autostart.get_active() if autostart_available else None)
             except (ValueError, PermissionError, OSError, RuntimeError): self.status.set_text("Настройки отклонены: сочетание недоступно или неверны права доступа к настройкам")
         dialog.destroy()
 
