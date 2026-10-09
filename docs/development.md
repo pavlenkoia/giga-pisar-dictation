@@ -77,6 +77,10 @@ Added a tag-triggered `vX.Y.Z` workflow for Ubuntu 24.04 amd64. It runs tests an
 
 Основной агент независимо подтвердил финальные 133 unittest tests, compileall, CLI help, сборку 0.2.3 amd64, strict release validator, dpkg metadata/contents, распаковку и relocated launcher help вне checkout без PYTHONPATH, desktop-file-validate, lintian и policy parser, git diff --check. Lintian — exit 0 с двумя известными warnings. Тесты выполняют фактический inline publish block в чистом временном каталоге с mock gh, без checkout и без сети/публикации. Свежий read-only reviewer не нашёл замечаний: OK with notes. actionlint недоступен; фактические cloud execution/token policies и desktop acceptance не проверены. Commit, push, tag, Release и установка не выполнялись.
 
+### Публикация GitHub Release v0.2.3 (2026-10-09)
+
+После отдельного разрешения владельца commit `90eba85` отправлен в `chore/github-deb-releases`, а annotated tag `v0.2.3` запустил [Actions run 37937954360](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/37937954360). Оба job прошли: 133 tests, static/package/lintian checks и публикация. [Публичный Release](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.3) содержит `giga-pisar-dictation_0.2.3_amd64.deb` и `SHA256SUMS`; основной агент скачал оба файла во временный каталог и подтвердил SHA256 и strict package metadata validator. Это supersedes предыдущие отметки об отсутствии cloud run и Release, но не подтверждает desktop acceptance. GitHub сообщает неблокирующее Node.js 20 deprecation warning для закреплённых actions (runner принудительно использовал Node.js 24); обновление actions — отдельная задача. Ветка не влита в main; тег не перемещался. Пакет не устанавливался, реальные пользовательские desktop effects не выполнялись.
+
 ### Выпуск 0.2.3 (2026-10-09)
 
 Версия проекта повышена до 0.2.3; changelog фиксирует исправление первой автовставки и согласованную политику замены clipboard. Пользователь подтвердил, что базовый сценарий первой вставки после этой политики работает. Это не является подтверждением всех гонок или полной desktop-приёмки.
