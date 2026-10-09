@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from giga_pisar_dictation.autostart import AutostartFile, DESKTOP_CONTENT
+from giga_pisar_dictation.autostart import AutostartFile, DESKTOP_CONTENT, LEGACY_DESKTOP_CONTENT
 from giga_pisar_dictation.config import Config
 from giga_pisar_dictation.desktop import DesktopEffects
 
@@ -48,8 +48,8 @@ class FakeSettingsDialog(FakeWidget):
     response = 1
     instances = []
     def __init__(self, **kwargs):
-        super().__init__(**kwargs); self.content = FakeWidget(); self.instances.append(self)
-    def add_button(self, *_args): pass
+        super().__init__(**kwargs); self.content = FakeWidget(); self.buttons = []; self.instances.append(self)
+    def add_button(self, label, response): self.buttons.append((label, response))
     def get_content_area(self): return self.content
     def run(self): return self.response
 
@@ -82,6 +82,7 @@ class SettingsDialogFallbackTests(unittest.TestCase):
             view.effects = effects; view.window = object(); view.status = FakeWidget()
             with patch.object(gui, "Gtk", GtkFake):
                 view.settings_dialog()
+            self.assertEqual(FakeSettingsDialog.instances[-1].buttons[:2], [("Отменить", 0), ("Сохранить", 1)])
             self.assertEqual(effects.autostart.calls, 1)
             self.assertEqual(len(effects.saved), 1)
             self.assertIsNone(effects.saved[0][1]["autostart_enabled"])
@@ -138,6 +139,24 @@ class AutostartFileTests(unittest.TestCase):
             self.assertFalse(entry.exists())
             store.set_enabled(False)
             self.assertEqual(stat.S_IMODE(directory.stat().st_mode), original_mode)
+
+    def test_legacy_and_current_exact_entries_are_recognized_without_read_migration(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config_home = Path(temp) / "config"; config_home.mkdir()
+            directory = config_home / "autostart"; directory.mkdir(mode=0o700)
+            entry = directory / "org.gigapisar.Dictation.desktop"
+            store = AutostartFile(config_home)
+            for content in (LEGACY_DESKTOP_CONTENT, DESKTOP_CONTENT):
+                entry.write_bytes(content)
+                entry.chmod(0o644)
+                self.assertTrue(store.is_enabled())
+                self.assertEqual(entry.read_bytes(), content)
+                store.set_enabled(True)
+                self.assertEqual(entry.read_bytes(), content)
+            entry.write_bytes(LEGACY_DESKTOP_CONTENT)
+            entry.chmod(0o644)
+            store.set_enabled(False)
+            self.assertFalse(entry.exists())
 
     def test_foreign_file_symlink_and_unsafe_directory_are_refused(self):
         with tempfile.TemporaryDirectory() as temp:

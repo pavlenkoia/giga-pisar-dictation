@@ -198,9 +198,9 @@ class SafetyTests(unittest.TestCase):
         window = DesktopWindow.__new__(DesktopWindow)
         buffer = Buffer(); window.output = Output(); window.status = Status()
         clipboard = Clipboard(); window.effects = type("Effects", (), {"clipboard": clipboard, "x11": None})()
-        DesktopWindow._button(window, None, "Copy")
+        DesktopWindow._button(window, None, "copy")
         self.assertEqual(clipboard.copied, ("complete output", None))
-        self.assertEqual(window.status.value, "Text copied")
+        self.assertEqual(window.status.value, "Текст скопирован")
 
     def test_manual_copy_cancels_pending_autopaste_restore(self):
         clipboard = FakeClipboard("old text"); timers = FakeTimers()

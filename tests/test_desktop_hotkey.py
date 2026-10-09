@@ -118,14 +118,14 @@ class DesktopSettingsTests(unittest.TestCase):
         backend.mapping[32]=66; backend.external.add((66,4)); backend.events=[backend.event(34)]
         hotkey._ready(9,1)
         self.assertFalse(hotkey.healthy); self.assertFalse(effects.shortcut_healthy)
-        self.assertIn("unavailable",effects.shortcut_status)
+        self.assertIn("недоступна",effects.shortcut_status)
         effects.config_saver=lambda _config:None
         with patch("giga_pisar_dictation.desktop.load_api_key",return_value=""):
             effects.save_settings(Config().base_url,120,"","",True,True,"Ctrl+Space")
-        self.assertFalse(effects.shortcut_healthy); self.assertIn("unavailable",effects.shortcut_status)
+        self.assertFalse(effects.shortcut_healthy); self.assertIn("недоступна",effects.shortcut_status)
         backend.external.clear(); backend.events=[backend.event(34)]; hotkey._ready(9,1)
         self.assertTrue(hotkey.healthy); self.assertTrue(effects.shortcut_healthy)
-        self.assertEqual(effects.shortcut_status,"Global shortcut active: Ctrl+Space")
+        self.assertEqual(effects.shortcut_status,"Глобальная клавиша включена: Ctrl+Space")
         hotkey.close()
 
     @patch("giga_pisar_dictation.desktop.load_api_key",return_value="")
@@ -171,7 +171,7 @@ class DesktopSettingsTests(unittest.TestCase):
         effects.target=73; effects.x11.current=88
         effects._response("later",None,8)
         self.assertEqual(effects.clipboard.targets,[73,73])
-        self.assertIn("not inserted",effects.view.status.text)
+        self.assertIn("не вставлена",effects.view.status.text)
     def test_start_recording_keeps_hotkey_press_target(self):
         effects=self.make(hotkey=Hotkey()); effects.client=object(); effects.target=73; effects._hotkey_target_pending=True
         effects.recording_generation=0

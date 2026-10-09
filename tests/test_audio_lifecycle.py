@@ -209,7 +209,7 @@ class DesktopRecordingTests(unittest.TestCase):
             self.assertFalse(glib.timers[1]())
             self.assertEqual(view.controller.state, State.IDLE)
             self.assertFalse(wav.exists()); self.assertEqual(client.calls, [])
-            self.assertIn("discarded", view.status.text)
+            self.assertIn("аудио удалено", view.status.text)
 
     def test_recording_limit_refreshes_idle_indicator_after_cancel_cleanup(self):
         from giga_pisar_dictation.gui import DesktopWindow
@@ -230,7 +230,7 @@ class DesktopRecordingTests(unittest.TestCase):
             effects._recording_limit(effects.recording_generation)
             self.assertEqual(view.controller.state, State.IDLE)
             self.assertEqual(view.indicator.icon, "giga-pisar-dictation-idle")
-            self.assertEqual(view.status.text, "Five-minute recording limit reached; audio discarded")
+            self.assertEqual(view.status.text, "Достигнут лимит записи в пять минут; аудио удалено")
 
     def test_successful_eos_flow_and_finalize_cancel_are_generation_safe(self):
         with tempfile.TemporaryDirectory() as tmp:

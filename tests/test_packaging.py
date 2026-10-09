@@ -62,7 +62,7 @@ class DebBuildTests(unittest.TestCase):
             result = subprocess.run([str(launcher), "--help"], cwd=temp, env=env, text=True,
                                     capture_output=True, timeout=20)
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            self.assertIn("Giga Pisar Dictation desktop client", result.stdout)
+            self.assertIn("Русский клиент диктовки «Гига Писарь»", result.stdout)
 
     def test_desktop_file_exec_icon_and_no_terminal(self):
         desktop = Path(__file__).resolve().parents[1] / "packaging/org.gigapisar.Dictation.desktop"

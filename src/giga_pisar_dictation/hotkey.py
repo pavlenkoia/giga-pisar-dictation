@@ -9,19 +9,19 @@ class ShortcutError(RuntimeError): pass
 
 
 def _require_keycode(keycode):
-    if not keycode: raise ShortcutError("Shortcut key is not mapped by X11")
+    if not keycode: raise ShortcutError("Клавиша сочетания отсутствует в раскладке X11")
 
 
 def parse_accelerator_details(value):
     parts=value.split("+")
-    if len(parts)<2 or any(not p for p in parts): raise ValueError("Shortcut needs a modifier and a key")
+    if len(parts)<2 or any(not p for p in parts): raise ValueError("Сочетание должно содержать клавишу-модификатор и клавишу")
     aliases={"CTRL":"CTRL","CONTROL":"CTRL","SHIFT":"SHIFT","ALT":"ALT","SUPER":"SUPER","META":"META"}
     try: modifiers=tuple(aliases[name.upper()] for name in parts[:-1])
-    except KeyError: raise ValueError("Unsupported shortcut modifier") from None
+    except KeyError: raise ValueError("Неподдерживаемый модификатор сочетания") from None
     key=parts[-1]
     if len(key)==1: sym=ord(key.lower())
     elif key.lower()=="space": sym=0x20
-    else: raise ValueError("Unsupported shortcut key")
+    else: raise ValueError("Неподдерживаемая клавиша сочетания")
     return sym,modifiers
 
 
@@ -130,7 +130,7 @@ class X11Hotkey:
         sym,names=parse_accelerator_details(accelerator); mods=self.backend.modifier_mask(names) if hasattr(self.backend,"modifier_mask") else parse_accelerator(accelerator)[1]
         code=self.backend.keycode(sym); _require_keycode(code); masks=self.backend.lock_masks()
         if sym==self.keysym and mods==self.required: return False
-        if getattr(self,"_prepared",None): raise RuntimeError("Shortcut rebind already in progress")
+        if getattr(self,"_prepared",None): raise RuntimeError("Переназначение сочетания уже выполняется")
         desired=self._binding_entries(code,mods,masks)
         additions=desired-self.entries
         self.gate.reset()
@@ -250,9 +250,9 @@ class X11Hotkey:
 class NativeX11Backend:
     def __init__(self, display=None):
         name=ctypes.util.find_library("X11")
-        if not name:raise RuntimeError("X11 library unavailable")
+        if not name:raise RuntimeError("Библиотека X11 недоступна")
         self.x=ctypes.CDLL(name); self._signatures(); self.display=self.x.XOpenDisplay(display)
-        if not self.display:raise RuntimeError("Cannot connect to X11")
+        if not self.display:raise RuntimeError("Не удалось подключиться к X11")
         self.root=self.x.XDefaultRootWindow(self.display)
     def _signatures(self):
         x=self.x
@@ -273,25 +273,25 @@ class NativeX11Backend:
         symbols={"CTRL":(0xffe3,0xffe4),"SHIFT":(0xffe1,0xffe2),"ALT":(0xffe9,0xffea),
                  "SUPER":(0xffeb,0xffec),"META":(0xffe7,0xffe8)}
         mapping=self.x.XGetModifierMapping(self.display)
-        if not mapping:raise ShortcutError("Cannot read X11 modifier mapping")
+        if not mapping:raise ShortcutError("Не удалось прочитать соответствие модификаторов X11")
         try:
             m=ctypes.cast(mapping,ctypes.POINTER(M)).contents
-            if m.max<=0 or not m.codes:raise ShortcutError("Invalid X11 modifier mapping")
+            if m.max<=0 or not m.codes:raise ShortcutError("Неверное соответствие модификаторов X11")
             result=0
             for name in set(names):
                 codes={self.keycode(sym) for sym in symbols[name]}; codes.discard(0); found=False
                 for slot in range(8):
                     if any(m.codes[slot*m.max+i] in codes for i in range(m.max)):result|=1<<slot;found=True
-                if not found:raise ShortcutError("Shortcut modifier is not mapped by X11")
+                if not found:raise ShortcutError("Модификатор сочетания отсутствует в раскладке X11")
             return result
         finally:self.x.XFreeModifiermap(mapping)
     def lock_masks(self):
         class M(ctypes.Structure):_fields_=[("max",ctypes.c_int),("codes",ctypes.POINTER(ctypes.c_ubyte))]
         mapping=self.x.XGetModifierMapping(self.display)
-        if not mapping:raise ShortcutError("Cannot read X11 modifier mapping")
+        if not mapping:raise ShortcutError("Не удалось прочитать соответствие модификаторов X11")
         try:
             m=ctypes.cast(mapping,ctypes.POINTER(M)).contents
-            if m.max<=0 or not m.codes:raise ShortcutError("Invalid X11 modifier mapping")
+            if m.max<=0 or not m.codes:raise ShortcutError("Неверное соответствие модификаторов X11")
             caps=self.keycode(0xffe5); num=self.keycode(0xff7f); caps_mask=2; num_mask=None
             for slot in range(8):
                 entries=[m.codes[slot*m.max+i] for i in range(m.max)]
@@ -315,7 +315,7 @@ class NativeX11Backend:
                 if failed:
                     for code,mask in entries:self.x.XUngrabKey(self.display,code,mask,self.root)
                     self.x.XSync(self.display,0)
-                    raise ShortcutError("Shortcut is already in use (X11 BadAccess)" if 10 in failed else "X11 shortcut registration failed")
+                    raise ShortcutError("Сочетание уже используется (X11 BadAccess)" if 10 in failed else "Не удалось зарегистрировать сочетание X11")
             finally:self.x.XSetErrorHandler(ctypes.cast(previous,_X_ERROR_HANDLER) if previous else _X_ERROR_HANDLER())
     def ungrab(self,keycode,required,masks):
         self.ungrab_entries({(keycode,required|lock) for lock in masks})

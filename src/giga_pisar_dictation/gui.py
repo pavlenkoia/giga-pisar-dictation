@@ -8,16 +8,18 @@ from .tray import TrayPolicy, TrayWatcher, icon_for_state, requires_quit_confirm
 
 class DesktopWindow:
     def __init__(self):
-        self.window = Gtk.Window(title="Giga Pisar Dictation")
+        self.window = Gtk.Window(title="Гига Писарь")
         self.window.set_default_size(460, 340)
-        self.shortcut_status = Gtk.Label(label="Global shortcut status: starting")
-        self.status = Gtk.Label(label="Ready"); self.output = Gtk.TextView()
+        self.shortcut_status = Gtk.Label(label="Состояние глобальной клавиши: запуск")
+        self.status = Gtk.Label(label="Готово"); self.output = Gtk.TextView()
         self.output.set_wrap_mode(Gtk.WrapMode.WORD_CHAR); self.output.set_editable(False)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8); box.set_border_width(12)
         box.pack_start(self.status, False, False, 0); box.pack_start(self.shortcut_status, False, False, 0); box.pack_start(self.output, True, True, 0)
         controls = Gtk.Box(spacing=6)
-        for label in ("Start", "Stop", "Cancel", "Copy", "Check server", "Settings", "Quit"):
-            button = Gtk.Button(label=label); button.connect("clicked", self._button, label)
+        for label, command in (("Начать", "start"), ("Остановить", "stop"), ("Отменить", "cancel"),
+                               ("Копировать", "copy"), ("Проверить сервер", "health"),
+                               ("Настройки", "settings"), ("Выйти", "quit")):
+            button = Gtk.Button(label=label); button.connect("clicked", self._button, command)
             controls.pack_start(button, True, True, 0)
         box.pack_start(controls, False, False, 0); self.window.add(box)
         self.window.connect("delete-event", self._hide)
@@ -57,8 +59,8 @@ class DesktopWindow:
             return
         menu = Gtk.Menu()
         show_item = None
-        for title, command in (("Show window", "show"), ("Toggle recording", "toggle"), ("Start", "start"),
-                               ("Stop", "stop"), ("Cancel", "cancel"), ("Status", "status"), ("Quit", "quit")):
+        for title, command in (("Показать окно", "show"), ("Переключить запись", "toggle"), ("Начать", "start"),
+                               ("Остановить", "stop"), ("Отменить", "cancel"), ("Состояние", "status"), ("Выйти", "quit")):
             item = Gtk.MenuItem(label=title); item.connect("activate", self._menu_action, command); menu.append(item)
             if command == "show": show_item = item
         menu.show_all(); self.indicator.set_menu(menu)
@@ -90,8 +92,10 @@ class DesktopWindow:
             state = self.controller.state
             icon = icon_for_state(state)
             try:
-                self.indicator.set_icon_full(icon, state.name.lower())
-                self.indicator.set_title("Giga Pisar Dictation — " + state.name.lower())
+                state_label = {"IDLE": "Ожидание", "RECORDING": "Запись", "FINALIZING": "Завершение",
+                               "REQUESTING": "Распознавание", "RESULT": "Готово", "ERROR": "Ошибка"}.get(state.name, "Состояние")
+                self.indicator.set_icon_full(icon, state_label)
+                self.indicator.set_title("Гига Писарь — " + state_label)
             except Exception: pass
 
     def _indicator_connected(self):
@@ -111,7 +115,7 @@ class DesktopWindow:
     def _tray_lost(self, available):
         if available is False and not self.window.get_visible():
             self.window.show_all()
-            self.status.set_text("Tray unavailable; window restored")
+            self.status.set_text("Трей недоступен; окно восстановлено")
 
     def _finish_launch(self, mode):
         if mode == "autostart" and self.tray_policy.may_start_hidden():
@@ -145,7 +149,7 @@ class DesktopWindow:
         if self.tray_policy.may_hide():
             self.window.hide()
         else:
-            self.status.set_text("Tray host unavailable; keep this window open or use Quit")
+            self.status.set_text("Трей недоступен; оставьте окно открытым или нажмите «Выйти»")
         return True
 
     def _action(self, command):
@@ -154,10 +158,10 @@ class DesktopWindow:
     def quit(self):
         if hasattr(self, "controller") and requires_quit_confirmation(self.controller.state):
             dialog = Gtk.MessageDialog(transient_for=self.window, flags=0, message_type=Gtk.MessageType.WARNING,
-                                      buttons=Gtk.ButtonsType.NONE, text="An operation is in progress")
-            dialog.format_secondary_text("Quit and cancel the current operation? Temporary audio will be removed.")
-            dialog.add_button("Continue", Gtk.ResponseType.CANCEL)
-            dialog.add_button("Quit", Gtk.ResponseType.OK)
+                                      buttons=Gtk.ButtonsType.NONE, text="Выполняется операция")
+            dialog.format_secondary_text("Выйти и отменить текущую операцию? Временная аудиозапись будет удалена.")
+            dialog.add_button("Продолжить", Gtk.ResponseType.CANCEL)
+            dialog.add_button("Выйти", Gtk.ResponseType.OK)
             response = dialog.run(); dialog.destroy()
             if response != Gtk.ResponseType.OK: return False
         if not self._shutdown:
@@ -168,17 +172,17 @@ class DesktopWindow:
         Gtk.main_quit()
         return True
 
-    def _button(self, _, label):
-        if label == "Copy":
+    def _button(self, _, command):
+        if command == "copy":
             buffer = self.output.get_buffer(); start, end = buffer.get_bounds()
             text = buffer.get_text(start, end, True)
             success = bool(getattr(self, "effects", None) and
                            self.effects.clipboard.copy_text(text, self.effects.x11))
-            self.status.set_text("Text copied" if success else "Copy could not be confirmed")
-        elif label == "Check server": self.effects.health()
-        elif label == "Settings": self.settings_dialog()
-        elif label == "Quit": self.quit()
-        else: self._action(label.lower())
+            self.status.set_text("Текст скопирован" if success else "Не удалось подтвердить копирование")
+        elif command == "health": self.effects.health()
+        elif command == "settings": self.settings_dialog()
+        elif command == "quit": self.quit()
+        else: self._action(command)
 
     def settings_dialog(self):
         autostart_available = True
@@ -186,32 +190,32 @@ class DesktopWindow:
         except (OSError, ValueError):
             autostart_available = False
             autostart_enabled = False
-        dialog = Gtk.Dialog(title="Settings", transient_for=self.window, flags=0)
-        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL); dialog.add_button("Save", Gtk.ResponseType.OK)
+        dialog = Gtk.Dialog(title="Настройки", transient_for=self.window, flags=0)
+        dialog.add_button("Отменить", Gtk.ResponseType.CANCEL); dialog.add_button("Сохранить", Gtk.ResponseType.OK)
         grid = Gtk.Grid(column_spacing=8, row_spacing=8, margin=12)
         shortcut_state = Gtk.Label(label=self.effects.shortcut_status)
         url = Gtk.Entry(); url.set_text(self.effects.config.base_url)
         timeout = Gtk.SpinButton.new_with_range(1, 3600, 1); timeout.set_value(self.effects.config.timeout_seconds)
         source = Gtk.Entry(); source.set_text(self.effects.config.audio_source)
-        key = Gtk.Entry(); key.set_visibility(False); key.set_placeholder_text("Leave blank to keep existing key")
-        auto = Gtk.CheckButton(label="Insert automatically only into original active X11 window")
+        key = Gtk.Entry(); key.set_visibility(False); key.set_placeholder_text("Оставьте пустым, чтобы сохранить прежний ключ")
+        auto = Gtk.CheckButton(label="Вставлять автоматически только в исходное активное окно X11")
         auto.set_active(self.effects.config.auto_insert)
-        autostart = Gtk.CheckButton(label="Start automatically when I log in")
+        autostart = Gtk.CheckButton(label="Запускать при входе в систему")
         autostart.set_active(autostart_enabled)
         autostart.set_sensitive(autostart_available)
-        hotkey_enabled = Gtk.CheckButton(label="Enable global X11 shortcut")
+        hotkey_enabled = Gtk.CheckButton(label="Включить глобальную клавишу X11")
         hotkey_enabled.set_active(self.effects.config.hotkey_enabled)
         hotkey = Gtk.Entry(); hotkey.set_text(self.effects.config.hotkey_accelerator)
-        settings_rows = [("Shortcut status", shortcut_state), ("API base URL", url), ("Timeout (seconds)", timeout), ("Audio source", source), ("API key", key), ("", auto), ("", autostart)]
+        settings_rows = [("Состояние клавиши", shortcut_state), ("Базовый URL API", url), ("Тайм-аут (секунды)", timeout), ("Источник аудио", source), ("Ключ API", key), ("", auto), ("", autostart)]
         if not autostart_available:
-            settings_rows.append(("", Gtk.Label(label="Autostart could not be checked; its existing state is unchanged.")))
-        settings_rows.extend((("", hotkey_enabled), ("Shortcut (e.g. Ctrl+Space)", hotkey)))
+            settings_rows.append(("", Gtk.Label(label="Не удалось проверить автозапуск; его состояние не изменено.")))
+        settings_rows.extend((("", hotkey_enabled), ("Клавиша (например, Ctrl+Space)", hotkey)))
         for row, (label, widget) in enumerate(settings_rows):
             grid.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1); grid.attach(widget, 1, row, 1, 1)
         dialog.get_content_area().add(grid); dialog.show_all()
         if dialog.run() == Gtk.ResponseType.OK:
             try: self.effects.save_settings(url.get_text(), timeout.get_value_as_int(), source.get_text(), key.get_text(), auto.get_active(), hotkey_enabled.get_active(), hotkey.get_text(), autostart_enabled=autostart.get_active() if autostart_available else None)
-            except (ValueError, PermissionError, OSError, RuntimeError): self.status.set_text("Settings rejected; shortcut may be unavailable or config permissions invalid")
+            except (ValueError, PermissionError, OSError, RuntimeError): self.status.set_text("Настройки отклонены: сочетание недоступно или неверны права доступа к настройкам")
         dialog.destroy()
 
 

@@ -11,7 +11,7 @@ env = dict(os.environ, PYTHONPATH=str(root / "src"))
 for command in ("start", "status", "toggle"):
     no_owner = subprocess.run([sys.executable, "-m", "giga_pisar_dictation", command], env=env, text=True, capture_output=True, timeout=5)
     assert no_owner.returncode != 0
-    assert "no recording started" in no_owner.stdout.lower()
+    assert "запись не начата" in no_owner.stdout.lower()
 owner = subprocess.Popen([sys.executable, str(root / "tests" / "ipc_fixture.py"), str(ready), str(received)], env=env)
 try:
     deadline = time.monotonic() + 5

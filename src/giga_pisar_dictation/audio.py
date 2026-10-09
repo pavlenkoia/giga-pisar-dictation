@@ -11,12 +11,12 @@ def private_audio_directory():
     temporary_root = Path("/tmp")
     root_stat = temporary_root.lstat()
     if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != 0 or not root_stat.st_mode & stat.S_ISVTX:
-        raise PermissionError("Unsafe system temporary directory")
+        raise PermissionError("Небезопасный системный временный каталог")
     directory = temporary_root / f"giga-pisar-{os.getuid()}"
     directory.mkdir(mode=0o700, exist_ok=True)
     st = directory.lstat()
     if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) != 0o700:
-        raise PermissionError("Unsafe audio directory")
+        raise PermissionError("Небезопасный каталог аудио")
     return directory
 
 
@@ -26,8 +26,8 @@ class PrivateWav:
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         st = self.directory.lstat()
         if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
-            raise PermissionError("Unsafe audio directory")
-        if stat.S_IMODE(st.st_mode) != 0o700: raise PermissionError("Audio directory must have mode 0700")
+            raise PermissionError("Небезопасный каталог аудио")
+        if stat.S_IMODE(st.st_mode) != 0o700: raise PermissionError("Права каталога аудио должны быть 0700")
         fd, name = tempfile.mkstemp(prefix="recording-", suffix=".wav", dir=self.directory)
         os.fchmod(fd, 0o600); os.close(fd)
         self.path = Path(name)
@@ -40,7 +40,7 @@ class PrivateWav:
     def cleanup_stale(directory: Path):
         st = directory.lstat()
         if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) != 0o700:
-            raise PermissionError("Unsafe audio directory")
+            raise PermissionError("Небезопасный каталог аудио")
         for p in directory.iterdir():
             try:
                 item = p.lstat()
@@ -61,7 +61,7 @@ class GstRecorder:
             Gst = gst
         self.Gst = Gst; self.on_error = on_error
         missing = [name for name in self.REQUIRED if not Gst.ElementFactory.find(name)]
-        if missing: raise RuntimeError("Required GStreamer audio plugins are unavailable")
+        if missing: raise RuntimeError("Необходимые аудиомодули GStreamer недоступны")
         pipeline = 'pulsesrc name=capture ! audioconvert ! audioresample ! audio/x-raw,format=S16LE,channels=1,rate=16000 ! wavenc ! filesink name=output'
         self.pipeline = Gst.parse_launch(pipeline)
         if source: self.pipeline.get_by_name("capture").set_property("device", source)
@@ -77,7 +77,7 @@ class GstRecorder:
         self.bus.connect("message", self._on_bus_message)
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             self.pipeline.set_state(Gst.State.NULL); self.bus.remove_signal_watch(); self.closed = True
-            raise RuntimeError("Unable to start audio capture")
+            raise RuntimeError("Не удалось начать запись звука")
 
     def _on_bus_message(self, _bus, message):
         message_type = message.type
@@ -101,7 +101,7 @@ class GstRecorder:
     def stop(self, timeout_seconds: int = 10):
         with self._condition:
             if self.closed:
-                if self._failed: raise RuntimeError("Unable to finalize WAV recording")
+                if self._failed: raise RuntimeError("Не удалось завершить запись WAV")
                 return
             self.pipeline.send_event(self.Gst.Event.new_eos())
             ready = self._condition.wait_for(lambda: self._message is not None or self._cancelled, timeout_seconds)
@@ -111,7 +111,7 @@ class GstRecorder:
             self._failed = failed
             self._cleanup()
         if failed:
-            raise RuntimeError("Unable to finalize WAV recording")
+            raise RuntimeError("Не удалось завершить запись WAV")
 
     def cancel(self):
         with self._condition:

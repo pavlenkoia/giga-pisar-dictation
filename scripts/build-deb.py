@@ -8,6 +8,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -16,14 +17,14 @@ PACKAGE = "giga-pisar-dictation"
 def project_version():
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     match = re.search(r'^version\s*=\s*"([0-9]+(?:\.[0-9]+)*)"\s*$', text, re.MULTILINE)
-    if not match: raise ValueError("Could not determine project version from pyproject.toml")
+    if not match: raise ValueError("Не удалось определить версию проекта в pyproject.toml")
     return match.group(1)
 
 
 def build_deb(output_dir):
-    if platform.machine() != "x86_64": raise RuntimeError("Only x86_64/amd64 package builds are supported")
+    if platform.machine() != "x86_64": raise RuntimeError("Сборка пакета поддерживается только для x86_64/amd64")
     dpkg_deb = shutil.which("dpkg-deb")
-    if not dpkg_deb: raise RuntimeError("dpkg-deb is required")
+    if not dpkg_deb: raise RuntimeError("Требуется dpkg-deb")
     version = project_version()
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -62,7 +63,7 @@ def build_deb(output_dir):
         shutil.copyfile(copyright_file, doc_dir / "copyright")
         changelog_date = datetime.datetime.now().astimezone().strftime("%a, %d %b %Y %H:%M:%S %z")
         changelog = (f"{PACKAGE} ({version}) unstable; urgency=low\n\n"
-                     "  * Initial local personal package build.\n\n"
+                     "  * Выпущено русскоязычное приложение и обновлена совместимость автозапуска.\n\n"
                      f" -- Local package <pavlenko@it-tian.ru>  {changelog_date}\n").encode("utf-8")
         (doc_dir / "changelog.gz").write_bytes(gzip.compress(changelog, mtime=0))
         (doc_dir / "copyright").chmod(0o644)
@@ -76,8 +77,21 @@ def build_deb(output_dir):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", default=str(ROOT / "dist"), help="output directory (default: dist/)")
+    class RussianArgumentParser(argparse.ArgumentParser):
+        def format_usage(self):
+            return super().format_usage().replace("usage:", "использование:")
+
+        def format_help(self):
+            return (super().format_help().replace("usage:", "использование:")
+                    .replace("options:", "параметры:")
+                    .replace("show this help message and exit", "показать эту справку и выйти"))
+
+        def error(self, message):
+            self.print_usage(sys.stderr)
+            self.exit(2, f"{self.prog}: ошибка: неверные аргументы\n")
+
+    parser = RussianArgumentParser(description="Сборка пакета «Гига Писарь» без установки")
+    parser.add_argument("--output-dir", default=str(ROOT / "dist"), help="каталог для пакета (по умолчанию: dist/)")
     arguments = parser.parse_args(argv)
     print(build_deb(arguments.output_dir))
     return 0

@@ -29,11 +29,11 @@ _X_ERROR_HANDLER = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void
 class X11Adapter:
     def __init__(self, display=None):
         name, xtest = ctypes.util.find_library("X11"), ctypes.util.find_library("Xtst")
-        if not name or not xtest: raise RuntimeError("X11 XTest libraries are unavailable")
+        if not name or not xtest: raise RuntimeError("Библиотеки XTest для X11 недоступны")
         self.x, self.xt = ctypes.CDLL(name), ctypes.CDLL(xtest)
         self._set_signatures()
         self.display = self.x.XOpenDisplay(display)
-        if not self.display: raise RuntimeError("Cannot connect to X11 display")
+        if not self.display: raise RuntimeError("Не удалось подключиться к дисплею X11")
 
     def _set_signatures(self):
         x = self.x

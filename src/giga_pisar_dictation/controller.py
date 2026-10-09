@@ -28,20 +28,20 @@ class Controller:
         self.effects = effects
         self.state = State.IDLE
         self.text: str | None = None
-        self.message = "Ready"
+        self.message = "Готово"
         self._request_generation = 0
 
     def start(self) -> bool:
         if self.state not in (State.IDLE, State.RESULT, State.ERROR):
-            self.message = "Busy"
+            self.message = "Занято"
             return False
         self.text = None
-        self.message = "Recording"
+        self.message = "Идёт запись"
         self.state = State.RECORDING
         try:
             self.effects.start_recording()
         except Exception:
-            self.fail("Audio recording failed")
+            self.fail("Не удалось записать звук")
             return False
         return True
 
@@ -49,11 +49,11 @@ class Controller:
         if self.state != State.RECORDING:
             return False
         self.state = State.FINALIZING
-        self.message = "Finalizing audio"
+        self.message = "Завершение записи"
         try:
             self.effects.finalize_recording()
         except Exception:
-            self.fail("Audio finalization failed")
+            self.fail("Не удалось завершить запись")
             return False
         return True
 
@@ -61,15 +61,15 @@ class Controller:
         if self.state != State.FINALIZING:
             return False
         if not valid:
-            self.fail("Audio is empty or invalid")
+            self.fail("Аудиозапись пуста или повреждена")
             return False
         self.state = State.REQUESTING
-        self.message = "Recognizing"
+        self.message = "Распознавание"
         self._request_generation += 1
         try:
             self.effects.submit_audio()
         except Exception:
-            self.fail("Unable to submit audio")
+            self.fail("Не удалось отправить аудиозапись")
             return False
         return True
 
@@ -77,11 +77,11 @@ class Controller:
         if self.state != State.REQUESTING or (generation is not None and generation != self._request_generation):
             return False
         if not text.strip():
-            self.fail("Server returned an empty transcription")
+            self.fail("Сервер вернул пустую расшифровку")
             return False
         self.text = text
         self.state = State.RESULT
-        self.message = "Transcription ready"
+        self.message = "Расшифровка готова"
         self.effects.remove_audio()
         return True
 
@@ -109,7 +109,7 @@ class Controller:
         except Exception:
             pass
         self.state = State.IDLE
-        self.message = "Cancelled"
+        self.message = "Отменено"
         self.text = None
         return True
 

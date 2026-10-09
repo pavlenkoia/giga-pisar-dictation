@@ -130,7 +130,7 @@ class TrayPolicyTests(unittest.TestCase):
         self.assertEqual(settings, ["scheduled"])
         view._hide()
         self.assertTrue(view.window.visible)
-        self.assertIn("Tray host unavailable", view.status.text)
+        self.assertIn("Трей недоступен", view.status.text)
 
     def test_indicator_secondary_activation_targets_show_menu_item(self):
         created = []
@@ -163,7 +163,7 @@ class TrayPolicyTests(unittest.TestCase):
         with patch.object(self.gui.Gtk, "Menu", Menu), patch.object(self.gui.Gtk, "MenuItem", MenuItem):
             window._create_indicator(namespace)
         indicator = created[0]
-        show_item = next(item for item in indicator.menu.items if item.label == "Show window")
+        show_item = next(item for item in indicator.menu.items if item.label == "Показать окно")
         self.assertIs(indicator.target, show_item)
         self.assertIn(("activate", window._menu_action, ("show",)), show_item.handlers)
         self.assertEqual([name for name, _callback in indicator.handlers], ["notify::connected"])
@@ -214,7 +214,7 @@ class TrayPolicyTests(unittest.TestCase):
                 effects = DesktopEffects(View(), config=Config(hotkey_enabled=enabled), key="", audio_directory=Path(temp),
                     clipboard=Clipboard(), x11_factory=lambda: self.fail("must not open X11"))
                 self.assertIsNone(effects.x11)
-                self.assertIn("X11 session unavailable", effects.view.status.text)
+                self.assertIn("сеанс X11 недоступен", effects.view.status.text)
                 effects.shutdown()
 
     def test_no_x11_shortcuts_are_not_registered(self):
@@ -224,7 +224,7 @@ class TrayPolicyTests(unittest.TestCase):
         effects._register_hotkey()
         self.assertFalse(effects.shortcut_healthy)
         self.assertIsNone(effects.hotkey)
-        self.assertIn("require an X11 session", effects.shortcut_status)
+        self.assertIn("требуется сеанс X11", effects.shortcut_status)
 
     def test_quit_refusal_preserves_work_and_confirmed_quit_shuts_down_once(self):
         for state in (State.RECORDING, State.FINALIZING, State.REQUESTING):

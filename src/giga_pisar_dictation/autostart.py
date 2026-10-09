@@ -6,7 +6,10 @@ import stat
 from pathlib import Path
 
 APP_ID = "org.gigapisar.Dictation"
-DESKTOP_CONTENT = b"[Desktop Entry]\nType=Application\nName=Giga Pisar Dictation\nExec=/usr/bin/giga-pisar-dictation --autostart\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+LEGACY_DESKTOP_CONTENT = b"[Desktop Entry]\nType=Application\nName=Giga Pisar Dictation\nExec=/usr/bin/giga-pisar-dictation --autostart\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+DESKTOP_CONTENT = "[Desktop Entry]\nType=Application\nName=Гига Писарь\nExec=/usr/bin/giga-pisar-dictation --autostart\nTerminal=false\nX-GNOME-Autostart-enabled=true\n".encode("utf-8")
+_OWNED_DESKTOP_CONTENTS = (LEGACY_DESKTOP_CONTENT, DESKTOP_CONTENT)
+_MAX_DESKTOP_CONTENT_LENGTH = max(map(len, _OWNED_DESKTOP_CONTENTS))
 _NAME = APP_ID + ".desktop"
 _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
 _FILE_FLAGS = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0) |
@@ -29,9 +32,9 @@ def _directory_fd(path: Path, *, create=False):
             fd = child
         metadata = os.fstat(fd)
         if metadata.st_uid != os.getuid() or not stat.S_ISDIR(metadata.st_mode):
-            raise PermissionError("Unsafe autostart directory")
+            raise PermissionError("Небезопасный каталог автозапуска")
         if stat.S_IMODE(metadata.st_mode) & 0o022:
-            raise PermissionError("Autostart directory is writable by other users")
+            raise PermissionError("Каталог автозапуска доступен для записи другим пользователям")
         return fd
     except Exception:
         os.close(fd)
@@ -42,7 +45,7 @@ class AutostartFile:
     def __init__(self, config_home=None):
         self.config_home = Path(config_home or os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
         if not self.config_home.is_absolute():
-            raise ValueError("XDG_CONFIG_HOME must be absolute")
+            raise ValueError("XDG_CONFIG_HOME должен быть абсолютным путём")
         self.directory = self.config_home / "autostart"
 
     def _open_directory(self, create=False):
@@ -55,14 +58,14 @@ class AutostartFile:
         try:
             metadata = os.fstat(file_fd)
             if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
-                raise PermissionError("Autostart entry is not an owned regular file")
+                raise PermissionError("Файл автозапуска не является обычным файлом текущего пользователя")
             if stat.S_IMODE(metadata.st_mode) & 0o022:
-                raise PermissionError("Autostart entry is writable by other users")
-            content = os.read(file_fd, len(DESKTOP_CONTENT) + 1)
-            if len(content) > len(DESKTOP_CONTENT):
-                raise PermissionError("Autostart entry is too large to be application-owned")
-            if content != DESKTOP_CONTENT:
-                raise PermissionError("Refusing to alter an unrecognized autostart entry")
+                raise PermissionError("Файл автозапуска доступен для записи другим пользователям")
+            content = os.read(file_fd, _MAX_DESKTOP_CONTENT_LENGTH + 1)
+            if len(content) > _MAX_DESKTOP_CONTENT_LENGTH:
+                raise PermissionError("Файл автозапуска слишком велик для распознавания")
+            if content not in _OWNED_DESKTOP_CONTENTS:
+                raise PermissionError("Отказ изменять нераспознанный файл автозапуска")
             return content
         finally:
             os.close(file_fd)
@@ -70,7 +73,7 @@ class AutostartFile:
     def is_enabled(self):
         try: fd = self._open_directory()
         except FileNotFoundError: return False
-        try: return self._read_owned(fd) == DESKTOP_CONTENT
+        try: return self._read_owned(fd) in _OWNED_DESKTOP_CONTENTS
         finally: os.close(fd)
 
     def set_enabled(self, enabled):
@@ -89,7 +92,7 @@ class AutostartFile:
         temp_name = "." + _NAME + "." + secrets.token_hex(8)
         try:
             existing = self._read_owned(fd)
-            if existing == DESKTOP_CONTENT: return
+            if existing in _OWNED_DESKTOP_CONTENTS: return
             temp_fd = os.open(temp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
                               0o644, dir_fd=fd)
             try:

@@ -25,7 +25,7 @@ class ApiClient:
     def __init__(self, base_url, key, timeout=120, session=None, timer_add=None, timer_remove=None):
         from .config import Config
         Config(base_url=base_url, timeout_seconds=timeout).validate()
-        if not key: raise ValueError("API key is required")
+        if not key: raise ValueError("Требуется ключ API")
         self.base_url, self.key, self.timeout = base_url.rstrip("/"), key, timeout
         self.session = session
         self._timer_add = timer_add
@@ -85,7 +85,7 @@ class ApiClient:
             if operation.stream is not None:
                 try: operation.stream.close(None)
                 except Exception: pass
-            finish(message.get_status(), b"", ApiError("Request timed out"))
+            finish(message.get_status(), b"", ApiError("Время ожидания запроса истекло"))
             in_deadline = False
             return False
 
@@ -96,7 +96,7 @@ class ApiClient:
             if operation.finished: return
             try: stream = sess.send_finish(result)
             except Exception as exc:
-                fail(ApiError("Request timed out") if operation.timed_out else self._io_error(exc)); return
+                fail(ApiError("Время ожидания запроса истекло") if operation.timed_out else self._io_error(exc)); return
             operation.stream = stream
             chunks = bytearray()
             def read_next():
@@ -106,7 +106,7 @@ class ApiClient:
                 if operation.finished: return
                 try: chunk = input_stream.read_bytes_finish(read_result).get_data()
                 except Exception as exc:
-                    fail(ApiError("Request timed out") if operation.timed_out else self._io_error(exc)); return
+                    fail(ApiError("Время ожидания запроса истекло") if operation.timed_out else self._io_error(exc)); return
                 if isinstance(chunk, tuple): chunk = chunk[0]
                 if not chunk:
                     finish(message.get_status(), bytes(chunks), None); return
@@ -115,7 +115,7 @@ class ApiClient:
                     operation.cancellable.cancel()
                     try: stream.close(None)
                     except Exception: pass
-                    fail(ApiError("Server response is too large")); return
+                    fail(ApiError("Ответ сервера слишком велик")); return
                 read_next()
             read_next()
         try: session.send_async(message, GLib.PRIORITY_DEFAULT, operation.cancellable, on_response)
@@ -132,25 +132,36 @@ class ApiClient:
 
     @staticmethod
     def _io_error(exc):
+        try:
+            from gi.repository import Gio, GLib
+            if isinstance(exc, GLib.Error):
+                domain = Gio.io_error_quark()
+                if exc.matches(domain, Gio.IOErrorEnum.CANCELLED):
+                    return ApiError("Запрос отменён")
+                if exc.matches(domain, Gio.IOErrorEnum.TIMED_OUT):
+                    return ApiError("Время ожидания запроса истекло")
+                return ApiError("Сервер недоступен")
+        except (ImportError, AttributeError, TypeError):
+            pass
         message = str(exc).lower()
-        if "cancel" in message: return ApiError("Request cancelled")
-        if "timed out" in message or "timeout" in message: return ApiError("Request timed out")
-        return ApiError("Server is unavailable")
+        if "cancel" in message: return ApiError("Запрос отменён")
+        if "timed out" in message or "timeout" in message: return ApiError("Время ожидания запроса истекло")
+        return ApiError("Сервер недоступен")
 
     @staticmethod
     def _status_error(status):
-        if status in (401, 403): return ApiError("API authorization failed")
-        if status == 413: return ApiError("Audio exceeds server size limit")
-        if status in (301, 302, 303, 307, 308): return ApiError("Redirect refused")
-        if status < 200 or status >= 300: return ApiError(f"Server returned HTTP {status}")
+        if status in (401, 403): return ApiError("Ошибка авторизации API")
+        if status == 413: return ApiError("Размер аудио превышает ограничение сервера")
+        if status in (301, 302, 303, 307, 308): return ApiError("Перенаправление отклонено")
+        if status < 200 or status >= 300: return ApiError(f"Сервер вернул HTTP {status}")
         return None
 
     def _finish_health(self, status, data, error, callback):
         if error: callback(None, error); return
         if self._status_error(status): callback(None, self._status_error(status)); return
         try: result = json.loads(data)
-        except (ValueError, UnicodeDecodeError): callback(None, ApiError("Server returned invalid JSON")); return
-        if not isinstance(result, dict): callback(None, ApiError("Server returned invalid health data")); return
+        except (ValueError, UnicodeDecodeError): callback(None, ApiError("Сервер вернул неверный JSON")); return
+        if not isinstance(result, dict): callback(None, ApiError("Сервер вернул неверные данные состояния")); return
         callback(result, None)
 
     def _finish_text(self, status, data, error, callback):
@@ -158,8 +169,8 @@ class ApiClient:
         status_error = self._status_error(status)
         if status_error: callback(None, status_error); return
         try: result = json.loads(data)
-        except (ValueError, UnicodeDecodeError): callback(None, ApiError("Server returned invalid JSON")); return
+        except (ValueError, UnicodeDecodeError): callback(None, ApiError("Сервер вернул неверный JSON")); return
         if not isinstance(result, dict) or not isinstance(result.get("text"), str):
-            callback(None, ApiError("Server returned invalid transcription")); return
-        if not result["text"].strip(): callback(None, ApiError("Server returned an empty transcription")); return
+            callback(None, ApiError("Сервер вернул неверную расшифровку")); return
+        if not result["text"].strip(): callback(None, ApiError("Сервер вернул пустую расшифровку")); return
         callback(result["text"], None)

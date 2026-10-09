@@ -106,9 +106,9 @@ class NativeGrabTests(unittest.TestCase):
 
     def test_native_rejects_zero_keycode_before_any_grab(self):
         native=NativeX11Backend.__new__(NativeX11Backend); native.x=object()
-        with self.assertRaisesRegex(Exception,"not mapped"):native.grab_entries({(0,4)})
-        with self.assertRaisesRegex(Exception,"not mapped"):native.grab(0,4,(0,2))
-        with self.assertRaisesRegex(Exception,"not mapped"):native.update_grabs(65,4,(0,),0,4,(0,))
+        with self.assertRaisesRegex(Exception,"отсутствует в раскладке"):native.grab_entries({(0,4)})
+        with self.assertRaisesRegex(Exception,"отсутствует в раскладке"):native.grab(0,4,(0,2))
+        with self.assertRaisesRegex(Exception,"отсутствует в раскладке"):native.update_grabs(65,4,(0,),0,4,(0,))
 
     def test_badaccess_during_partial_grab_rolls_back_only_new_entries(self):
         from giga_pisar_dictation.hotkey import XErrorEvent
@@ -122,7 +122,7 @@ class NativeGrabTests(unittest.TestCase):
         x.XSync=FakeCFunction(sync)
         x.XSetErrorHandler=FakeCFunction(lambda cb:(setattr(x,"handler",cb) or None))
         native=NativeX11Backend.__new__(NativeX11Backend);native.x=x;native.display=1;native.root=3
-        with self.assertRaisesRegex(Exception,"already in use"):
+        with self.assertRaisesRegex(Exception,"уже используется"):
             native.grab_entries({(65,6),(65,20),(65,22)})
         self.assertEqual(x.grabs,{(65,4)})
         self.assertEqual(set(x.ungrabs),{(65,6),(65,20),(65,22)})
@@ -188,11 +188,11 @@ class X11HotkeyTests(unittest.TestCase):
         self.assertEqual(self.hotkey.keycode,65)
     def test_zero_keycode_start_rebind_mapping_change_never_grabs_zero(self):
         backend=FakeBackend(); backend.mapping[32]=0
-        with self.assertRaisesRegex(Exception,"not mapped"):X11Hotkey("Ctrl+Space",lambda *_:None,glib=FakeGLib(),backend=backend)
+        with self.assertRaisesRegex(Exception,"отсутствует в раскладке"):X11Hotkey("Ctrl+Space",lambda *_:None,glib=FakeGLib(),backend=backend)
         self.assertFalse(any(code==0 for code,_mask in backend.grabs))
         backend=FakeBackend(); hotkey=X11Hotkey("Ctrl+Space",lambda *_:None,glib=FakeGLib(),backend=backend)
         old=backend.grabs.copy(); backend.mapping[ord("a")]=0
-        with self.assertRaisesRegex(Exception,"not mapped"):hotkey.rebind("Ctrl+a")
+        with self.assertRaisesRegex(Exception,"отсутствует в раскладке"):hotkey.rebind("Ctrl+a")
         self.assertEqual(backend.grabs,old); self.assertFalse(any(code==0 for code,_mask in backend.grabs))
         errors=[]; hotkey.on_error=errors.append; backend.mapping[32]=0
         backend.events=[backend.event(34)]; hotkey._ready(9,1)
@@ -223,7 +223,7 @@ class X11HotkeyTests(unittest.TestCase):
         self.backend.external.add((67,4)); self.backend.events=[self.backend.event(34)]; self.hotkey._ready(9,1)
         self.assertEqual(self.hotkey.keycode,66); self.assertEqual(self.backend.grabs,current)
         self.assertEqual(len(self.backend.update_calls),2)
-        self.assertEqual(effects.shortcut_status,"Global shortcut unavailable after X11 keymap change")
+        self.assertEqual(effects.shortcut_status,"Глобальная клавиша недоступна после изменения раскладки X11")
         self.assertEqual(effects.view.shortcut_status.text,effects.shortcut_status)
     def test_close_removes_glib_sources_and_late_callback_is_ignored(self):
         callback=self.glib.watches[self.hotkey.source]; self.hotkey.close()

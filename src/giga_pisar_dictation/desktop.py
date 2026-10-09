@@ -25,7 +25,7 @@ class DesktopEffects:
         self.config_saver, self.key_saver = config_saver, key_saver
         from .autostart import AutostartFile
         self.autostart = autostart_store or AutostartFile()
-        self.shortcut_status = "Shortcut disabled"
+        self.shortcut_status = "Клавиша отключена"
         self.shortcut_healthy = False
         self.wav_factory, self.recorder_factory = wav_factory, recorder_factory
         self.config = config or load_config()
@@ -45,9 +45,9 @@ class DesktopEffects:
         self.hotkey = None
         self._register_hotkey()
         if hasattr(self.view, "shortcut_status"): self.view.shortcut_status.set_text(self.shortcut_status)
-        platform_notice = ("; X11 session unavailable; global shortcut and insertion are disabled"
+        platform_notice = ("; сеанс X11 недоступен; глобальная клавиша и вставка отключены"
                            if self.x11 is None else "")
-        self.view.status.set_text("WARNING: HTTP does not encrypt the API key or audio; trusted LAN only; " +
+        self.view.status.set_text("ПРЕДУПРЕЖДЕНИЕ: HTTP не шифрует ключ API и аудио; только доверенная локальная сеть; " +
                                   self.shortcut_status + platform_notice)
 
     def _register_hotkey(self):
@@ -55,7 +55,7 @@ class DesktopEffects:
         if self.x11 is None:
             self.hotkey = None
             self.shortcut_healthy = False
-            self.shortcut_status = "Global shortcut and insertion require an X11 session"
+            self.shortcut_status = "Для глобальной клавиши и вставки требуется сеанс X11"
             return
         try:
             from .hotkey import X11Hotkey
@@ -64,19 +64,19 @@ class DesktopEffects:
                                   glib=self.glib, target_at_press=lambda: self.x11.active_window() if self.x11 else None,
                                   on_error=self._hotkey_error, on_status=self._hotkey_status_changed)
             self.shortcut_healthy = getattr(self.hotkey, "healthy", True)
-            self.shortcut_status = ("Global shortcut active: " + self.config.hotkey_accelerator
-                                    if self.shortcut_healthy else "Global shortcut unavailable after X11 keymap change")
+            self.shortcut_status = ("Глобальная клавиша включена: " + self.config.hotkey_accelerator
+                                    if self.shortcut_healthy else "Глобальная клавиша недоступна после изменения раскладки X11")
         except Exception:
             self.hotkey = None
             self.shortcut_healthy = False
-            self.shortcut_status = "Global shortcut unavailable; choose another shortcut in Settings"
+            self.shortcut_status = "Глобальная клавиша недоступна; выберите другое сочетание в настройках"
 
     def _hotkey_status_changed(self, healthy, accelerator=None):
         self.shortcut_healthy = bool(healthy)
         if self.shortcut_healthy:
-            self.shortcut_status = "Global shortcut active: " + (accelerator or self.config.hotkey_accelerator)
+            self.shortcut_status = "Глобальная клавиша включена: " + (accelerator or self.config.hotkey_accelerator)
         else:
-            self.shortcut_status = "Global shortcut unavailable after X11 keymap change"
+            self.shortcut_status = "Глобальная клавиша недоступна после изменения раскладки X11"
         if hasattr(self.view, "shortcut_status"): self.view.shortcut_status.set_text(self.shortcut_status)
 
     def _hotkey_error(self, _message):
@@ -92,7 +92,7 @@ class DesktopEffects:
         return GLib.SOURCE_REMOVE
 
     def start_recording(self):
-        if not self.client: raise RuntimeError("API key is not configured")
+        if not self.client: raise RuntimeError("Ключ API не настроен")
         target_captured = getattr(self, "_hotkey_target_pending", False)
         active = None if target_captured else (self.x11.active_window() if self.x11 else None)
         self._hotkey_target_pending = False
@@ -110,18 +110,18 @@ class DesktopEffects:
         self.recorder = self.recorder_factory(self.wav.path, self.config.audio_source,
                                               lambda: self._audio_error(generation))
         self.limit_source = self.glib.timeout_add_seconds(300, lambda: self._recording_limit(generation))
-        self.view.status.set_text("WARNING: plain HTTP exposes the Bearer key on trusted LAN; recording; " + self.shortcut_status)
+        self.view.status.set_text("ПРЕДУПРЕЖДЕНИЕ: HTTP передаёт ключ Bearer открыто в доверенной локальной сети; идёт запись; " + self.shortcut_status)
 
     def _audio_error(self, generation):
         if generation == self.recording_generation and self.view.controller.state == State.RECORDING:
-            self.view.controller.fail("Audio device or file error")
+            self.view.controller.fail("Ошибка аудиоустройства или файла")
             self.view.refresh()
 
     def _recording_limit(self, generation):
         if generation == self.recording_generation and self.view.controller.state == State.RECORDING:
             self.view.controller.cancel()
             self.view.refresh()
-            self.view.status.set_text("Five-minute recording limit reached; audio discarded")
+            self.view.status.set_text("Достигнут лимит записи в пять минут; аудио удалено")
         return GLib.SOURCE_REMOVE
 
     def finalize_recording(self):
@@ -138,7 +138,7 @@ class DesktopEffects:
             def complete():
                 if generation != self.recording_generation or self.view.controller.state != State.FINALIZING:
                     return GLib.SOURCE_REMOVE
-                if error: self.view.controller.fail("Audio finalization failed")
+                if error: self.view.controller.fail("Не удалось завершить запись аудио")
                 else: self.view.controller.audio_finalized(valid)
                 self.view.refresh()
                 return GLib.SOURCE_REMOVE
@@ -172,8 +172,8 @@ class DesktopEffects:
             if self.config.auto_insert and self.target and self.x11:
                 try: inserted = self.clipboard.paste_safely(text, self.x11, self.target, self.view.modifiers_down())
                 except Exception: inserted = False
-            if not inserted: delivery_status = "Transcription ready; not inserted. Review and copy manually."
-            else: delivery_status = "Paste sent; delivery is not confirmed. Review the target window."
+            if not inserted: delivery_status = "Расшифровка готова, не вставлена. Проверьте и скопируйте вручную."
+            else: delivery_status = "Команда вставки отправлена, доставка не подтверждена. Проверьте целевое окно."
         self.view.refresh()
         if delivery_status: self.view.status.set_text(delivery_status)
 
@@ -188,7 +188,7 @@ class DesktopEffects:
         if self.wav:
             folder = self.wav.directory
             try: self.wav.remove()
-            except OSError: self.view.status.set_text("Could not remove temporary audio file")
+            except OSError: self.view.status.set_text("Не удалось удалить временный аудиофайл")
             try: folder.rmdir()
             except OSError: pass
         self.recorder = None
@@ -196,11 +196,11 @@ class DesktopEffects:
 
     def health(self):
         if not self.client:
-            self.view.status.set_text("WARNING: plain HTTP on trusted LAN only; configure key to check server")
+            self.view.status.set_text("ПРЕДУПРЕЖДЕНИЕ: HTTP допускается только в доверенной локальной сети; задайте ключ для проверки сервера")
             return
         self.client.health_async(lambda data, error: self.view.status.set_text(
-            "WARNING: unencrypted HTTP; server reachable" if not error else
-            "WARNING: unencrypted HTTP; " + str(error)))
+            "ПРЕДУПРЕЖДЕНИЕ: HTTP не зашифрован; сервер доступен" if not error else
+            "ПРЕДУПРЕЖДЕНИЕ: HTTP не зашифрован; " + str(error)))
 
     def save_settings(self, url, timeout, source, key, auto_insert, hotkey_enabled=True,
                       hotkey_accelerator="Ctrl+Space", autostart_enabled=None):
@@ -250,7 +250,7 @@ class DesktopEffects:
                 try: new_registration.close()
                 except Exception as error: rollback_errors.append(error)
             if rollback_errors:
-                raise RuntimeError("Settings save failed and one or more rollback actions failed") from save_error
+                raise RuntimeError("Не удалось сохранить настройки и отменить одно или несколько изменений") from save_error
             raise
         if changed_registration and old_hotkey: old_hotkey.commit_rebind()
         if not new_config.hotkey_enabled and old_hotkey:
@@ -262,25 +262,25 @@ class DesktopEffects:
         self.config = new_config
         if not new_config.hotkey_enabled:
             self.shortcut_healthy = False
-            self.shortcut_status = "Global shortcut disabled"
+            self.shortcut_status = "Глобальная клавиша отключена"
         elif new_registration:
             self.shortcut_healthy = getattr(new_registration,"healthy",True)
-            self.shortcut_status = ("Global shortcut active: " + new_config.hotkey_accelerator
-                                    if self.shortcut_healthy else "Global shortcut unavailable after X11 keymap change")
+            self.shortcut_status = ("Глобальная клавиша включена: " + new_config.hotkey_accelerator
+                                    if self.shortcut_healthy else "Глобальная клавиша недоступна после изменения раскладки X11")
         elif changed_registration:
             self.shortcut_healthy = True
-            self.shortcut_status = "Global shortcut active: " + new_config.hotkey_accelerator
+            self.shortcut_status = "Глобальная клавиша включена: " + new_config.hotkey_accelerator
         elif old_hotkey:
             self.shortcut_healthy = getattr(old_hotkey,"healthy",self.shortcut_healthy)
-            self.shortcut_status = ("Global shortcut active: " + new_config.hotkey_accelerator
-                                    if self.shortcut_healthy else "Global shortcut unavailable after X11 keymap change")
+            self.shortcut_status = ("Глобальная клавиша включена: " + new_config.hotkey_accelerator
+                                    if self.shortcut_healthy else "Глобальная клавиша недоступна после изменения раскладки X11")
         else:
             self.shortcut_healthy = False
-            self.shortcut_status = "Global shortcut unavailable; choose another shortcut in Settings"
+            self.shortcut_status = "Глобальная клавиша недоступна; выберите другое сочетание в настройках"
         self.key = load_api_key()
         self.client = ApiClient(self.config.base_url, self.key, self.config.timeout_seconds) if self.key else None
         if hasattr(self.view, "shortcut_status"): self.view.shortcut_status.set_text(self.shortcut_status)
-        self.view.status.set_text("Settings saved; WARNING: HTTP sends the Bearer key in cleartext on trusted LAN; " + self.shortcut_status)
+        self.view.status.set_text("Настройки сохранены; ПРЕДУПРЕЖДЕНИЕ: HTTP передаёт ключ Bearer открыто в доверенной локальной сети; " + self.shortcut_status)
 
     def shutdown(self):
         if self._shutdown: return

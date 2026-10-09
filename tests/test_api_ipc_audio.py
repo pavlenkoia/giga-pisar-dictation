@@ -72,27 +72,27 @@ class AsyncSoupTests(unittest.TestCase):
         self.assertIn(b'name="file"; filename="recording.wav"', self.server.body)
         self.assertIn(b"RIFFfake", self.server.body)
     def test_soup_status_json_size_cancel_timeout_and_redirect(self):
-        for path, expect in (("/unauthorized", "authorization"), ("/forbidden", "authorization"),
-                             ("/too-large", "size limit"), ("/redirect", "Redirect"),
-                             ("/bad-json", "invalid JSON"), ("/large", "too large")):
+        for path, expect in (("/unauthorized", "авторизации"), ("/forbidden", "авторизации"),
+                             ("/too-large", "ограничение сервера"), ("/redirect", "Перенаправление"),
+                             ("/bad-json", "неверный JSON"), ("/large", "слишком велик")):
             client = ApiClient(self.base + path, "fictional-test-key", timeout=1)
             _, error = self.wait(lambda cb: client.health_async(cb))
             self.assertIsInstance(error, ApiError); self.assertIn(expect.lower(), str(error).lower())
         cancelled = Gio.Cancellable(); cancelled.cancel()
         _, error = self.wait(lambda cb: self.client.health_async(cb, cancelled))
-        self.assertIsInstance(error, ApiError); self.assertIn("cancel", str(error).lower())
+        self.assertIsInstance(error, ApiError); self.assertIn("отменён", str(error).lower())
         client = ApiClient("http://127.0.0.1:1", "fictional-test-key", timeout=1)
         _, error = self.wait(lambda cb: client.health_async(cb))
-        self.assertIsInstance(error, ApiError); self.assertIn("unavailable", str(error).lower())
+        self.assertIsInstance(error, ApiError); self.assertIn("недоступен", str(error).lower())
         client = ApiClient(self.base + "/slow", "fictional-test-key", timeout=1)
         _, error = self.wait(lambda cb: client.health_async(cb))
         self.assertIsInstance(error, ApiError)
-        self.assertIn("timed out", str(error).lower())
+        self.assertIn("ожидания", str(error).lower())
         client = ApiClient(self.base + "/trickle", "fictional-test-key", timeout=1)
         started = time.monotonic(); operation = []
         _, error = self.wait(lambda cb: operation.append(client.health_async(cb)))
         self.assertIsInstance(error, ApiError)
-        self.assertIn("timed out", str(error).lower())
+        self.assertIn("ожидания", str(error).lower())
         self.assertTrue(operation[0].timed_out); self.assertTrue(operation[0].finished)
         self.assertIsNone(operation[0].timer_id)
         self.assertLess(time.monotonic() - started, 2.5)

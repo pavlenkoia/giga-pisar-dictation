@@ -25,10 +25,10 @@ class Config:
     def validate(self):
         parts = urlsplit(self.base_url)
         if (parts.scheme not in ("http", "https") or not parts.hostname or parts.username is not None or
-                parts.password is not None or parts.query or parts.fragment): raise ValueError("Invalid API base URL")
-        if not 1 <= self.timeout_seconds <= 3600: raise ValueError("Timeout must be between 1 and 3600 seconds")
-        if not isinstance(self.hotkey_enabled, bool): raise ValueError("Invalid shortcut enabled setting")
-        if not isinstance(self.hotkey_accelerator, str): raise ValueError("Invalid shortcut accelerator")
+                parts.password is not None or parts.query or parts.fragment): raise ValueError("Неверный базовый URL API")
+        if not 1 <= self.timeout_seconds <= 3600: raise ValueError("Тайм-аут должен быть от 1 до 3600 секунд")
+        if not isinstance(self.hotkey_enabled, bool): raise ValueError("Неверное значение настройки клавиши")
+        if not isinstance(self.hotkey_accelerator, str): raise ValueError("Неверное сочетание клавиш")
         from .hotkey import parse_accelerator
         parse_accelerator(self.hotkey_accelerator)
 
@@ -50,8 +50,8 @@ def _open_dir(path: Path, create=True):
                 next_fd = os.open(component, _DIRECTORY, dir_fd=fd)
             os.close(fd); fd = next_fd
         st = os.fstat(fd)
-        if st.st_uid != os.getuid() or not stat.S_ISDIR(st.st_mode): raise PermissionError("Unsafe configuration directory")
-        if stat.S_IMODE(st.st_mode) != 0o700: raise PermissionError("Configuration directory must have mode 0700")
+        if st.st_uid != os.getuid() or not stat.S_ISDIR(st.st_mode): raise PermissionError("Небезопасный каталог настроек")
+        if stat.S_IMODE(st.st_mode) != 0o700: raise PermissionError("Права каталога настроек должны быть 0700")
         return fd
     except Exception:
         os.close(fd)
@@ -68,7 +68,7 @@ def _read_private_at(directory_fd, name):
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) != 0o600:
-            raise PermissionError("Unsafe private file")
+            raise PermissionError("Небезопасный закрытый файл")
         chunks = []
         while True:
             data = os.read(fd, 65536)
@@ -95,7 +95,7 @@ def _atomic_write_at(directory_fd, name, data):
         try:
             st = os.fstat(old)
             if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) != 0o600:
-                raise PermissionError("Unsafe existing private file")
+                raise PermissionError("Небезопасный существующий закрытый файл")
         finally: os.close(old)
     temp = f".write-{os.getpid()}-{os.urandom(8).hex()}"
     fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0), 0o600, dir_fd=directory_fd)
@@ -118,7 +118,7 @@ def save_config(config, directory=None):
 
 
 def save_api_key(key, directory=None):
-    if not key or "\n" in key or "\r" in key: raise ValueError("API key must be non-empty and single-line")
+    if not key or "\n" in key or "\r" in key: raise ValueError("Ключ API должен быть непустой строкой без переносов")
     fd = _open_dir(directory or config_dir())
     try: _atomic_write_at(fd, "api-key", key.encode("utf-8"))
     finally: os.close(fd)
