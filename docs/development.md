@@ -71,6 +71,12 @@ Maintainer is the owner-supplied `Local package <pavlenko@it-tian.ru>`; local ch
 - Requirements now place Check server in the main window after Settings are saved, and preserve the AppIndicator ordinary-click menu limitation, supported Show window paths, unknown-host fallback, and first-run Settings behavior.
 - After these changes, the full suite passed 88 tests; `compileall`, CLI help, `git diff --check`, package build/extraction checks, desktop-file validation, and lintian were repeated. Lintian remains exit 0 with the two warnings listed above.
 
+### GitHub Debian releases
+
+Added a tag-triggered `vX.Y.Z` workflow for Ubuntu 24.04 amd64. It runs tests and package validation before a separate minimally privileged publish job. The build checks version/tag/package metadata, lintian findings and produces a package checksum. The release lintian policy and publish preflight have local executable regression coverage (known warning forms, unknown/malformed findings, valid mocked publish, tampered checksum, unexpected assets, existing release, API error and missing tag). Actions are pinned to verified full commit SHAs. No cloud run or Release has been performed; repository policy and target desktop acceptance remain unverified. See `docs/releases.md` and ADR 0004.
+
+Основной агент независимо подтвердил финальные 133 unittest tests, compileall, CLI help, сборку 0.2.3 amd64, strict release validator, dpkg metadata/contents, распаковку и relocated launcher help вне checkout без PYTHONPATH, desktop-file-validate, lintian и policy parser, git diff --check. Lintian — exit 0 с двумя известными warnings. Тесты выполняют фактический inline publish block в чистом временном каталоге с mock gh, без checkout и без сети/публикации. Свежий read-only reviewer не нашёл замечаний: OK with notes. actionlint недоступен; фактические cloud execution/token policies и desktop acceptance не проверены. Commit, push, tag, Release и установка не выполнялись.
+
 ### Выпуск 0.2.3 (2026-10-09)
 
 Версия проекта повышена до 0.2.3; changelog фиксирует исправление первой автовставки и согласованную политику замены clipboard. Пользователь подтвердил, что базовый сценарий первой вставки после этой политики работает. Это не является подтверждением всех гонок или полной desktop-приёмки.

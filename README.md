@@ -21,4 +21,4 @@ PYTHONPATH=src /usr/bin/python3 -m giga_pisar_dictation --help
 git diff --check
 ```
 
-The `.deb` has been built and checked without installing it. Full Mint/Cinnamon/X11, tray-host, autostart-login, update/removal and LAN acceptance remains unperformed. AppIndicator hosts may show a menu on ordinary left click; **Показать окно** remains available from the menu and by launching the app. See [docs](docs/README.md) for constraints and measured results.
+The `.deb` has been built and checked without installing it. Owner-published binary downloads may be offered in GitHub Releases; no license is granted and download availability grants no redistribution or reuse permission. See [release instructions](docs/releases.md). Full Mint/Cinnamon/X11, tray-host, autostart-login, update/removal and LAN acceptance remains unperformed. AppIndicator hosts may show a menu on ordinary left click; **Показать окно** remains available from the menu and by launching the app. See [docs](docs/README.md) for constraints and measured results.

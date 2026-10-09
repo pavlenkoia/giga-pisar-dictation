@@ -9,6 +9,7 @@
 - [ADR 0003](decisions/0003-desktop-deb-release.md) — первый устанавливаемый desktop `.deb`, lifecycle, tray и пользовательский autostart.
 - [API contract](api-contract.md) — multipart, health и ошибки.
 - [Разработка](development.md) — локальные проверки, фактические результаты сборки и известные ограничения.
+- [Выпуски](releases.md) — GitHub Release, проверка checksum и ручная установка.
 - [Ручная настройка и тестирование](manual-testing.md) — shortcut и целевой сценарий.
 
 Базовую работу встроенного shortcut пользователь проверил и подтвердил. План shortcut закрыт с согласованным P2-ограничением (см. development.md). Полная LAN/GTK/X11 приёмка и все ручные edge-case сценарии не подтверждены; моки и локальные тесты не заменяют desktop acceptance.

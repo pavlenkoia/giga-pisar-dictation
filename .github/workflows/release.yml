@@ -1,0 +1,108 @@
+name: Debian release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install runner dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-soup-3.0 gir1.2-gstreamer-1.0 gir1.2-ayatanaappindicator3-0.1 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pulseaudio libx11-6 libxtst6 dbus-x11 desktop-file-utils lintian
+      - name: Run tests and static checks
+        run: |
+          PYTHONPATH=src /usr/bin/python3 -m unittest discover -s tests -v
+          /usr/bin/python3 -m compileall -q src tests scripts
+          PYTHONPATH=src /usr/bin/python3 -m giga_pisar_dictation --help
+          desktop-file-validate packaging/org.gigapisar.Dictation.desktop
+      - name: Build and verify package
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          rm -rf dist && mkdir dist
+          /usr/bin/python3 scripts/build-deb.py --output-dir dist
+          shopt -s nullglob
+          debs=(dist/*.deb)
+          test "${#debs[@]}" -eq 1
+          /usr/bin/python3 scripts/check-release.py "$RELEASE_TAG" "${debs[0]}"
+          dpkg-deb --info "${debs[0]}"
+          dpkg-deb --contents "${debs[0]}"
+          lintian --fail-on error "${debs[0]}" 2>&1 | tee /tmp/lintian.log
+          /usr/bin/python3 scripts/check-lintian-release.py < /tmp/lintian.log
+          tmp=$(mktemp -d)
+          dpkg-deb --extract "${debs[0]}" "$tmp"
+          (cd /tmp && env -u PYTHONPATH "$tmp/usr/bin/giga-pisar-dictation" --help)
+          (cd dist && sha256sum "$(basename "${debs[0]}")" > SHA256SUMS)
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-assets
+          path: |
+            dist/*.deb
+            dist/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: build-and-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-assets
+          path: release-assets
+      - name: Validate and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          : "${RELEASE_TAG:?}" "${REPOSITORY:?}"
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          release_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 2
+          debs=(release-assets/*.deb)
+          test "${#debs[@]}" -eq 1
+          expected="giga-pisar-dictation_${release_version}_amd64.deb"
+          test "$(basename "${debs[0]}")" = "$expected"
+          expected_sum="$(cd release-assets && sha256sum "$(basename "${debs[0]}")")"
+          test "$(cat release-assets/SHA256SUMS)" = "$expected_sum"
+          (cd release-assets && sha256sum --check --strict SHA256SUMS)
+          # Verify tag and release through REST endpoints; only an HTTP 404
+          # for the Release means it is absent. All other API errors fail closed.
+          gh api "repos/$REPOSITORY/git/ref/tags/$RELEASE_TAG" >/dev/null
+          release_error=$(mktemp)
+          if gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" >/dev/null 2>"$release_error"; then
+            echo "Release $RELEASE_TAG already exists; refusing to overwrite" >&2
+            exit 1
+          else
+            rc=$?
+            if ! grep -Eq 'Not Found \(HTTP 404\)|HTTP 404' "$release_error"; then
+              cat "$release_error" >&2
+              echo "Unable to determine whether the release exists (gh exit $rc)" >&2
+              exit "$rc"
+            fi
+          fi
+          rm -f "$release_error"
+          gh release create "$RELEASE_TAG" "${debs[0]}" release-assets/SHA256SUMS --repo "$REPOSITORY" --title "$RELEASE_TAG" --verify-tag --notes "Linux Mint 22.x / Ubuntu 24.04, amd64. Download the .deb and SHA256SUMS and verify with sha256sum -c SHA256SUMS. Owner-published binary download; no license is granted and no redistribution or reuse permission is granted. CI is not desktop acceptance; no APT updates are provided."

@@ -37,7 +37,10 @@ class DebBuildTests(unittest.TestCase):
             self.assertTrue((extracted / "usr/share/applications/org.gigapisar.Dictation.desktop").is_file())
             copyright_file = extracted / "usr/share/doc/giga-pisar-dictation/copyright"
             changelog_file = extracted / "usr/share/doc/giga-pisar-dictation/changelog.gz"
-            self.assertIn("No license is granted", copyright_file.read_text(encoding="utf-8"))
+            notice = copyright_file.read_text(encoding="utf-8")
+            self.assertIn("owner may publish", notice)
+            self.assertIn("No license is granted", notice)
+            self.assertIn("does not grant permission", notice)
             self.assertTrue(changelog_file.is_file())
             for state in ("idle", "recording", "processing", "error"):
                 self.assertTrue((extracted / f"usr/share/icons/hicolor/scalable/status/giga-pisar-dictation-{state}.svg").is_file())
