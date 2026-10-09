@@ -91,6 +91,10 @@ class DesktopEffects:
         if not result.get("ok"): self._hotkey_target_pending = False
         return GLib.SOURCE_REMOVE
 
+    def _cancel_pending_paste(self):
+        cancel = getattr(getattr(self, "clipboard", None), "cancel_pending_paste", None)
+        if cancel: cancel()
+
     def start_recording(self):
         if not self.client: raise RuntimeError("Ключ API не настроен")
         target_captured = getattr(self, "_hotkey_target_pending", False)
@@ -105,6 +109,7 @@ class DesktopEffects:
         if not target_captured:
             self.target = active if active and active != own else self.view.external_window
         self.wav = self.wav_factory(self.audio_directory)
+        self._cancel_pending_paste()
         self.recording_generation += 1
         generation = self.recording_generation
         self.recorder = self.recorder_factory(self.wav.path, self.config.audio_source,
@@ -164,15 +169,46 @@ class DesktopEffects:
     def _response(self, text, error, generation):
         if getattr(self, "_shutdown", False) or self.view.controller.state != State.REQUESTING or generation != self.view.controller._request_generation:
             return
+        self._cancel_pending_paste()
         delivery_status = None
         if error: self.view.controller.fail(str(error))
         else:
             self.view.controller.response(text, generation)
             inserted = False
-            if self.config.auto_insert and self.target and self.x11:
-                try: inserted = self.clipboard.paste_safely(text, self.x11, self.target, self.view.modifiers_down())
-                except Exception: inserted = False
-            if not inserted: delivery_status = "Расшифровка готова, не вставлена. Проверьте и скопируйте вручную."
+            refusal = None
+            if not self.config.auto_insert:
+                refusal = "Автоматическая вставка выключена"
+            elif self.x11 is None:
+                refusal = "Сеанс X11 недоступен"
+            elif not self.target:
+                refusal = "Исходное окно не определено"
+            elif hasattr(self.clipboard, "paste_safely_async"):
+                operation = self.recording_generation
+                def paste_complete(sent, reason):
+                    if (self._shutdown or not self.config.auto_insert or
+                            self.view.controller.state != State.RESULT or
+                            operation != self.recording_generation or
+                            self.view.controller._request_generation != generation):
+                        return
+                    self.view.status.set_text("Команда вставки отправлена, доставка не подтверждена. Проверьте целевое окно." if sent else
+                        "Расшифровка готова, не вставлена: " + (reason or "неизвестная причина") + ". Проверьте и скопируйте вручную.")
+                self.view.refresh()
+                try:
+                    self.clipboard.paste_safely_async(text, self.x11, self.target, self.view.modifiers_down, paste_complete)
+                except Exception:
+                    paste_complete(False, "Не удалось безопасно выполнить автоматическую вставку")
+                return
+            else:
+                try:
+                    diagnostic_paste = getattr(self.clipboard, "paste_safely_with_reason", None)
+                    if diagnostic_paste:
+                        inserted, refusal = diagnostic_paste(text, self.x11, self.target, self.view.modifiers_down())
+                    else:
+                        inserted = self.clipboard.paste_safely(text, self.x11, self.target, self.view.modifiers_down())
+                        refusal = None if inserted else "Не удалось безопасно подтвердить вставку"
+                except Exception:
+                    refusal = "Не удалось безопасно выполнить автоматическую вставку"
+            if not inserted: delivery_status = "Расшифровка готова, не вставлена: " + (refusal or "неизвестная причина") + ". Проверьте и скопируйте вручную."
             else: delivery_status = "Команда вставки отправлена, доставка не подтверждена. Проверьте целевое окно."
         self.view.refresh()
         if delivery_status: self.view.status.set_text(delivery_status)
@@ -259,6 +295,8 @@ class DesktopEffects:
             self.hotkey = new_registration
             if hasattr(new_registration,"on_error"): new_registration.on_error=self._hotkey_error
             if hasattr(new_registration,"on_status"): new_registration.on_status=self._hotkey_status_changed
+        if not new_config.auto_insert:
+            self._cancel_pending_paste()
         self.config = new_config
         if not new_config.hotkey_enabled:
             self.shortcut_healthy = False
@@ -286,6 +324,7 @@ class DesktopEffects:
         if self._shutdown: return
         self._shutdown = True
         if self.cancellable: self.cancellable.cancel()
+        self._cancel_pending_paste()
         if self.view.controller.state not in (State.IDLE, State.RESULT, State.ERROR):
             self.view.controller.cancel()
         self.remove_audio()

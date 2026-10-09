@@ -141,6 +141,8 @@ class TrayPolicyTests(unittest.TestCase):
         class MenuItem:
             def __init__(self, label): self.label = label; self.handlers = []
             def connect(self, signal, callback, *args): self.handlers.append((signal, callback, args))
+        class Separator:
+            label = None
         class IndicatorObject:
             def __init__(self): self.handlers = []; self.menu = None; self.target = None
             def set_status(self, _status): pass
@@ -160,13 +162,15 @@ class TrayPolicyTests(unittest.TestCase):
         })
         window = self.gui.DesktopWindow.__new__(self.gui.DesktopWindow)
         window.indicator = None
-        with patch.object(self.gui.Gtk, "Menu", Menu), patch.object(self.gui.Gtk, "MenuItem", MenuItem):
+        with patch.object(self.gui.Gtk, "Menu", Menu), patch.object(self.gui.Gtk, "MenuItem", MenuItem), patch.object(self.gui.Gtk, "SeparatorMenuItem", Separator):
             window._create_indicator(namespace)
         indicator = created[0]
         show_item = next(item for item in indicator.menu.items if item.label == "Показать окно")
         self.assertIs(indicator.target, show_item)
         self.assertIn(("activate", window._menu_action, ("show",)), show_item.handlers)
         self.assertEqual([name for name, _callback in indicator.handlers], ["notify::connected"])
+        self.assertEqual([getattr(item, "label", None) for item in indicator.menu.items],
+                         ["Показать окно", None, "Начать", "Остановить", "Отменить", "Переключить запись", None, "Выйти"])
 
     def test_default_tray_watcher_constructor_and_cleanup_use_real_gio(self):
         class Connection:

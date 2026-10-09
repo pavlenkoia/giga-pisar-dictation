@@ -33,7 +33,11 @@ class Monitor:
     def stop(self): self.stopped = True
 
 
-def fake_gst(monitor): return SimpleNamespace(DeviceMonitor=SimpleNamespace(new=lambda: monitor))
+def fake_gst(monitor):
+    class Caps:
+        @staticmethod
+        def from_string(value): return value
+    return SimpleNamespace(DeviceMonitor=SimpleNamespace(new=lambda: monitor), Caps=Caps)
 
 
 class AudioDeviceTests(unittest.TestCase):
@@ -43,6 +47,17 @@ class AudioDeviceTests(unittest.TestCase):
         self.assertEqual(result, [("alsa_input.one", "Microphone (alsa_input.one)"), ("alsa_input.two", "Microphone (alsa_input.two)")])
         self.assertTrue(monitor.stopped)
         self.assertEqual(monitor.filters, [("Audio/Source", "audio/x-raw")])
+
+    def test_real_gst_caps_filter_contract_offline_without_starting_monitor(self):
+        import gi
+        gi.require_version("Gst", "1.0")
+        from gi.repository import Gst
+        Gst.init(None)
+        monitor = Gst.DeviceMonitor.new()
+        from giga_pisar_dictation.audio_devices import _add_audio_source_filter
+        _add_audio_source_filter(Gst, monitor)
+        self.assertIsInstance(Gst.Caps.from_string("audio/x-raw"), Gst.Caps)
+        monitor = None
 
     def test_real_gst_structure_get_string_contract_offline(self):
         import gi

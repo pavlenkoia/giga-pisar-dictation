@@ -136,6 +136,8 @@ class RussianUiTests(unittest.TestCase):
         class MenuItem:
             def __init__(self, label): self.label = label; self.connected = None
             def connect(self, signal, callback, command): self.connected = (signal, callback, command)
+        class Separator:
+            label = None
         class IndicatorObject:
             def set_status(self, *_args): pass
             def connect(self, *_args): pass
@@ -150,11 +152,11 @@ class RussianUiTests(unittest.TestCase):
             "IndicatorStatus": type("Status", (), {"ACTIVE": 1}),
         })
         view = gui.DesktopWindow.__new__(gui.DesktopWindow)
-        with patch.object(gui.Gtk, "Menu", Menu), patch.object(gui.Gtk, "MenuItem", MenuItem):
+        with patch.object(gui.Gtk, "Menu", Menu), patch.object(gui.Gtk, "MenuItem", MenuItem), patch.object(gui.Gtk, "SeparatorMenuItem", Separator):
             view._create_indicator(namespace)
-        self.assertEqual([(item.label, item.connected[2]) for item in view.indicator.menu.items], [
-            ("Показать окно", "show"), ("Переключить запись", "toggle"), ("Начать", "start"),
-            ("Остановить", "stop"), ("Отменить", "cancel"), ("Состояние", "status"), ("Выйти", "quit")])
+        self.assertEqual([(item.label, getattr(item, "connected", None)[2] if getattr(item, "connected", None) else None) for item in view.indicator.menu.items], [
+            ("Показать окно", "show"), (None, None), ("Начать", "start"),
+            ("Остановить", "stop"), ("Отменить", "cancel"), ("Переключить запись", "toggle"), (None, None), ("Выйти", "quit")])
 
     def test_quit_dialog_uses_explicit_russian_button_labels(self):
         from giga_pisar_dictation import gui

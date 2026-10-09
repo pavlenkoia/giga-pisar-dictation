@@ -63,7 +63,7 @@ def build_deb(output_dir):
         shutil.copyfile(copyright_file, doc_dir / "copyright")
         changelog_date = datetime.datetime.now().astimezone().strftime("%a, %d %b %Y %H:%M:%S %z")
         changelog = (f"{PACKAGE} ({version}) unstable; urgency=low\n\n"
-                     "  * Выпущено русскоязычное приложение и обновлена совместимость автозапуска.\n\n"
+                     "  * Исправлена первая автовставка и политика замены буфера обмена.\n\n"
                      f" -- Local package <pavlenko@it-tian.ru>  {changelog_date}\n").encode("utf-8")
         (doc_dir / "changelog.gz").write_bytes(gzip.compress(changelog, mtime=0))
         (doc_dir / "copyright").chmod(0o644)

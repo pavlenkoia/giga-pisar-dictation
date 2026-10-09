@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from giga_pisar_dictation.autostart import AutostartFile, DESKTOP_CONTENT, LEGACY_DESKTOP_CONTENT
+from giga_pisar_dictation.autostart import (AutostartFile, DESKTOP_CONTENT, LEGACY_DESKTOP_CONTENT,
+                                             GroupWritableAutostartDirectoryError)
 from giga_pisar_dictation.config import Config
 from giga_pisar_dictation.desktop import DesktopEffects
 
@@ -28,7 +29,10 @@ class FakeX11:
 
 
 class FakeWidget:
-    def __init__(self, *args, **kwargs): self.text = kwargs.get("label", ""); self.active = False; self.value = 120; self.sensitive = True
+    instances = []
+    def __init__(self, *args, **kwargs):
+        self.text = kwargs.get("label", ""); self.active = False; self.value = 120; self.sensitive = True
+        self.instances.append(self)
     def set_text(self, value): self.text = value
     def get_text(self): return self.text
     def append(self, item_id, label):
@@ -42,6 +46,8 @@ class FakeWidget:
     def set_active(self, value): self.active = value
     def get_active(self): return self.active
     def set_sensitive(self, value): self.sensitive = value
+    def set_line_wrap(self, value): self.line_wrap = value
+    def set_max_width_chars(self, value): self.max_width_chars = value
     def set_value(self, value): self.value = value
     def get_value_as_int(self): return int(self.value)
     def attach(self, *_args): pass
@@ -81,8 +87,13 @@ class SettingsDialogFallbackTests(unittest.TestCase):
             CheckButton = FakeWidget
             ResponseType = type("Response", (), {"CANCEL": 0, "OK": 1})
         GtkFake.Grid = FakeWidget
-        for error in (PermissionError("unsafe directory"), OSError("unsafe entry")):
-            FakeSettingsDialog.instances.clear(); FakeSettingsDialog.response = 1
+        errors = (
+            (GroupWritableAutostartDirectoryError("details"), "каталог доступен для записи группе/другим"),
+            (PermissionError("foreign file or ownership"), "не удалось безопасно проверить состояние"),
+            (OSError("access denied"), "не удалось безопасно проверить состояние"),
+        )
+        for error, expected_diagnostic in errors:
+            FakeSettingsDialog.instances.clear(); FakeWidget.instances.clear(); FakeSettingsDialog.response = 1
             effects = Effects(error)
             view = gui.DesktopWindow.__new__(gui.DesktopWindow)
             view.effects = effects; view.window = object(); view.status = FakeWidget()
@@ -92,6 +103,13 @@ class SettingsDialogFallbackTests(unittest.TestCase):
             self.assertEqual(effects.autostart.calls, 1)
             self.assertEqual(len(effects.saved), 1)
             self.assertIsNone(effects.saved[0][1]["autostart_enabled"])
+            diagnostic = next(widget for widget in FakeWidget.instances
+                              if widget.text.startswith("Автозапуск недоступен:"))
+            self.assertIn(expected_diagnostic, diagnostic.text)
+            if not isinstance(error, GroupWritableAutostartDirectoryError):
+                self.assertIn("Остальные настройки можно сохранить.", diagnostic.text)
+            self.assertTrue(diagnostic.line_wrap)
+            self.assertEqual(diagnostic.max_width_chars, 44)
 
     def test_cancel_does_not_save_settings_when_autostart_unavailable(self):
         from unittest.mock import patch
@@ -115,6 +133,16 @@ class SettingsDialogFallbackTests(unittest.TestCase):
 
 
 class AutostartFileTests(unittest.TestCase):
+    def test_group_writable_autostart_directory_has_specific_typed_refusal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config_home = Path(temp) / "config"
+            config_home.mkdir()
+            directory = config_home / "autostart"
+            directory.mkdir(mode=0o700)
+            directory.chmod(0o775)
+            with self.assertRaises(GroupWritableAutostartDirectoryError):
+                AutostartFile(config_home).is_enabled()
+
     def test_default_disabled_does_not_create_entry_directory(self):
         with tempfile.TemporaryDirectory() as temp:
             config_home = Path(temp) / "config"

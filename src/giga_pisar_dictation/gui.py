@@ -60,8 +60,12 @@ class DesktopWindow:
             return
         menu = Gtk.Menu()
         show_item = None
-        for title, command in (("Показать окно", "show"), ("Переключить запись", "toggle"), ("Начать", "start"),
-                               ("Остановить", "stop"), ("Отменить", "cancel"), ("Состояние", "status"), ("Выйти", "quit")):
+        for title, command in (("Показать окно", "show"), (None, None), ("Начать", "start"),
+                               ("Остановить", "stop"), ("Отменить", "cancel"),
+                               ("Переключить запись", "toggle"), (None, None), ("Выйти", "quit")):
+            if title is None:
+                menu.append(Gtk.SeparatorMenuItem())
+                continue
             item = Gtk.MenuItem(label=title); item.connect("activate", self._menu_action, command); menu.append(item)
             if command == "show": show_item = item
         menu.show_all(); self.indicator.set_menu(menu)
@@ -187,10 +191,20 @@ class DesktopWindow:
 
     def settings_dialog(self):
         autostart_available = True
+        autostart_diagnostic = None
         try: autostart_enabled = self.effects.autostart.is_enabled()
+        except PermissionError as error:
+            autostart_available = False
+            autostart_enabled = False
+            from .autostart import GroupWritableAutostartDirectoryError
+            if isinstance(error, GroupWritableAutostartDirectoryError):
+                autostart_diagnostic = "Автозапуск недоступен:\nкаталог доступен для записи группе/другим.\nПрава может исправить владелец."
+            else:
+                autostart_diagnostic = "Автозапуск недоступен:\nне удалось безопасно проверить состояние.\nОстальные настройки можно сохранить."
         except (OSError, ValueError):
             autostart_available = False
             autostart_enabled = False
+            autostart_diagnostic = "Автозапуск недоступен:\nне удалось безопасно проверить состояние.\nОстальные настройки можно сохранить."
         dialog = Gtk.Dialog(title="Настройки", transient_for=self.window, flags=0)
         dialog.add_button("Отменить", Gtk.ResponseType.CANCEL); dialog.add_button("Сохранить", Gtk.ResponseType.OK)
         grid = Gtk.Grid(column_spacing=8, row_spacing=8, margin=12)
@@ -225,7 +239,10 @@ class DesktopWindow:
             settings_rows.append(("", source_error))
         settings_rows.extend((("Ключ API", key), ("", auto), ("", autostart)))
         if not autostart_available:
-            settings_rows.append(("", Gtk.Label(label="Не удалось проверить автозапуск; его состояние не изменено.")))
+            diagnostic = Gtk.Label(label=autostart_diagnostic)
+            diagnostic.set_line_wrap(True)
+            diagnostic.set_max_width_chars(44)
+            settings_rows.append(("", diagnostic))
         settings_rows.extend((("", hotkey_enabled), ("Клавиша (например, Ctrl+Space)", hotkey)))
         for row, (label, widget) in enumerate(settings_rows):
             grid.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1); grid.attach(widget, 1, row, 1, 1)

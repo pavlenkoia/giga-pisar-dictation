@@ -117,15 +117,20 @@ class X11Adapter:
         return any(code not in ignore and self._is_down(keymap, code) for code in modifier_keycodes)
 
     def paste(self, expected_window, modifiers_down=False):
-        if modifiers_down or self.active_window() != expected_window or not self.window_exists(expected_window):
-            return False
+        return self.paste_with_reason(expected_window, modifiers_down)[0]
+
+    def paste_with_reason(self, expected_window, modifiers_down=False):
+        if modifiers_down: return False, "Удерживается клавиша-модификатор"
+        if self.active_window() != expected_window: return False, "Исходное окно больше не активно"
+        if not self.window_exists(expected_window): return False, "Исходное окно закрыто"
         control = int(self.x.XKeysymToKeycode(self.display, 0xFFE3))
         v_key = int(self.x.XKeysymToKeycode(self.display, ord("v")))
-        if not control or not v_key: return False
+        if not control or not v_key: return False, "Раскладка X11 не предоставляет клавиши для вставки"
         modifier_codes = self._modifier_keycodes()
         keymap = self._query_keymap()
-        if keymap is None or modifier_codes is None or self.modifiers_down(keymap, modifier_codes): return False
-        if self._is_down(keymap, control) or self._is_down(keymap, v_key): return False
+        if keymap is None or modifier_codes is None: return False, "Не удалось проверить состояние клавиатуры X11"
+        if self.modifiers_down(keymap, modifier_codes): return False, "Удерживается клавиша-модификатор"
+        if self._is_down(keymap, control) or self._is_down(keymap, v_key): return False, "Удерживается клавиша вставки"
 
         pressed = []
         success = False
@@ -133,22 +138,25 @@ class X11Adapter:
         try:
             # Recheck immediately before synthesis; release only key-down events this call accepted.
             keymap = self._query_keymap()
-            if keymap is None or self.modifiers_down(keymap, modifier_codes): return False
-            if self._is_down(keymap, control) or self._is_down(keymap, v_key): return False
-            if not self.xt.XTestFakeKeyEvent(self.display, control, 1, 0): return False
+            if keymap is None: return False, "Не удалось проверить состояние клавиатуры X11"
+            if self.modifiers_down(keymap, modifier_codes): return False, "Удерживается клавиша-модификатор"
+            if self._is_down(keymap, control) or self._is_down(keymap, v_key): return False, "Удерживается клавиша вставки"
+            if not self.xt.XTestFakeKeyEvent(self.display, control, 1, 0): return False, "X11 не смог отправить команду вставки"
             pressed.append(control)
             keymap = self._query_keymap()
             modifier_codes = self._modifier_keycodes()
-            if keymap is None or modifier_codes is None or self.modifiers_down(keymap, modifier_codes, ignore=(control,)): return False
-            if self._is_down(keymap, v_key): return False
-            if not self.xt.XTestFakeKeyEvent(self.display, v_key, 1, 0): return False
+            if keymap is None or modifier_codes is None: return False, "Не удалось проверить состояние клавиатуры X11"
+            if self.modifiers_down(keymap, modifier_codes, ignore=(control,)): return False, "Удерживается клавиша-модификатор"
+            if self._is_down(keymap, v_key): return False, "Удерживается клавиша вставки"
+            if not self.xt.XTestFakeKeyEvent(self.display, v_key, 1, 0): return False, "X11 не смог отправить команду вставки"
             pressed.append(v_key)
             success = True
         finally:
             for keycode in reversed(pressed):
                 if not self.xt.XTestFakeKeyEvent(self.display, keycode, 0, 0): releases_ok = False
             if pressed: self.x.XFlush(self.display)
-        return success and releases_ok
+        if not releases_ok: return False, "X11 не смог завершить команду вставки"
+        return (True, None) if success else (False, "X11 не смог отправить команду вставки")
 
     def close(self):
         if self.display:

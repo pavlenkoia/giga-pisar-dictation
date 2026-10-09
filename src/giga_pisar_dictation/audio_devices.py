@@ -7,6 +7,10 @@ def _structure_string(structure, key):
     return structure.get_string(key)
 
 
+def _add_audio_source_filter(gst, monitor):
+    monitor.add_filter("Audio/Source", gst.Caps.from_string("audio/x-raw"))
+
+
 def list_audio_sources(gst=None):
     if gst is None:
         import gi
@@ -16,7 +20,7 @@ def list_audio_sources(gst=None):
     monitor = gst.DeviceMonitor.new()
     if monitor is None:
         raise RuntimeError("Не удалось создать список аудиоустройств")
-    monitor.add_filter("Audio/Source", "audio/x-raw")
+    _add_audio_source_filter(gst, monitor)
     if not monitor.start():
         raise RuntimeError("Не удалось перечислить аудиоустройства")
     try:
