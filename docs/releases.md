@@ -1,18 +1,56 @@
-# Debian releases
+# Выпуск Debian-пакетов
 
-A release is built from a pushed `vX.Y.Z` tag. The workflow tests the exact tagged commit and publishes one amd64 `.deb` plus `SHA256SUMS` to GitHub Releases. The package version, Debian metadata, and tag must agree. A pre-existing Release is a hard failure; create a new version/tag for corrections.
+После отправки тега `vX.Y.Z` GitHub Actions проверяет отмеченный коммит, собирает один пакет `.deb` для amd64 и публикует его вместе с `SHA256SUMS` в GitHub Releases. Версия в `pyproject.toml`, метаданные пакета и тег должны совпадать.
 
-## Maintainer procedure
+Если выпуск с таким тегом уже существует, публикация останавливается без перезаписи. Для исправленного пакета нужна новая версия и новый тег.
 
-1. Update `pyproject.toml` version and relevant package changelog text; run the documented tests and package checks.
-2. Review and commit/push the source changes under the normal separate authorization. No version bump is performed by the workflow.
-3. Only when separately authorized, create and push the matching `vX.Y.Z` tag. The push starts GitHub Actions; inspect the complete build/test and publish jobs.
-4. Verify both Release assets and download them. In the download directory run `sha256sum -c SHA256SUMS`.
+## Подтверждённый выпуск
 
-The workflow uses a read-only build/test job and a separate `contents: write` publish job with GitHub's built-in token. The publish job does not check out the repository or execute repository scripts; it validates only the downloaded package/checksum and performs GitHub CLI API operations. Actions are pinned to full commit SHAs. The first public release `v0.2.3` was published after explicit owner authorization. [GitHub Actions run 37937954360](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/37937954360) passed both jobs, including 133 tests. Both assets were downloaded from [the Release](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.3); SHA256SUMS and package metadata were independently verified. This confirms repository/token policy for that run, not future runs or desktop acceptance. The task branch was pushed; it has not been merged into `main`.
+Первый публичный [выпуск v0.2.3](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.3) опубликован по разрешению владельца. В [запуске GitHub Actions 37937954360](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/37937954360) успешно завершились сборка, 133 теста, проверки пакета и публикация.
 
-## Download and install
+Оба файла скачаны из опубликованного выпуска; контрольная сумма и метаданные пакета проверены независимо. Изменения автоматического выпуска влиты в `main`. Тег `v0.2.3` по-прежнему указывает на коммит сборки `90eba85` и не перемещался.
 
-Download the `.deb` and `SHA256SUMS` from the Release, verify the checksum, then install as the user with `sudo apt install ./giga-pisar-dictation_VERSION_amd64.deb`. This is a manually downloaded package; no APT repository or automatic updates are provided. The target remains Linux Mint 22.x/Cinnamon/X11; CI on Ubuntu 24.04 is not desktop acceptance.
+Этот запуск подтверждает работу настроек репозитория и разрешений токена на момент выпуска, но не гарантирует будущие запуски или работу приложения в графической сессии. GitHub сообщил неблокирующее предупреждение об устаревшем Node.js 20 в закреплённых действиях; среда сборки использовала Node.js 24. Обновление этих действий остаётся отдельной задачей.
 
-Owner-published binary downloads are permitted by the notice. No license is granted, and public availability does not grant redistribution or reuse permission. No open-source license is selected. GitHub Release distribution does not change package layout, runtime behavior, or the requirement for separate desktop/LAN acceptance.
+## Порядок выпуска для сопровождающего
+
+1. Обновите версию в `pyproject.toml` и описание изменений пакета в `scripts/build-deb.py`. Выполните тесты и проверки из [документа о разработке](development.md).
+2. Проверьте изменения, создайте коммит и отправьте его в репозиторий. При работе через агента операции Git выполняются только по отдельному разрешению владельца. Автоматическая сборка не повышает версию сама.
+3. Создайте и отправьте совпадающий тег `vX.Y.Z`. Его отправка запускает сборку и публикацию — это не только отметка версии. При работе через агента требуется отдельное разрешение на этот шаг.
+4. Проверьте оба задания GitHub Actions: сборку с тестами и публикацию.
+5. Убедитесь, что в выпуске есть `.deb` и `SHA256SUMS`, скачайте оба файла и проверьте контрольную сумму из каталога скачивания:
+
+   ```sh
+   sha256sum --check --strict SHA256SUMS
+   ```
+
+Не перемещайте опубликованный тег и не заменяйте файлы уже выпущенной версии.
+
+## Как устроена автоматизация
+
+Сценарий находится в [`.github/workflows/release.yml`](../.github/workflows/release.yml).
+
+- Сборка и тесты работают с правом чтения репозитория на Ubuntu 24.04, x86_64.
+- Проверяются формат тега, версия проекта, имя и метаданные пакета, содержимое и запуск распакованной справки. Проверка `lintian` допускает только два известных предупреждения: отсутствие указания правообладателя и страницы руководства.
+- Отдельное задание публикации получает право `contents: write` и встроенный `GITHUB_TOKEN`; дополнительный личный токен не нужен.
+- Задание публикации не загружает исходники и не выполняет скрипты репозитория. Оно проверяет скачанные файлы и контрольную сумму, наличие тега и отсутствие существующего выпуска, затем обращается к API через GitHub CLI.
+- Сторонние действия закреплены полными идентификаторами коммитов. Повторная публикация существующего выпуска запрещена.
+
+## Скачать и установить
+
+Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.3:
+
+```sh
+sha256sum --check --strict SHA256SUMS
+sudo apt install ./giga-pisar-dictation_0.2.3_amd64.deb
+```
+
+Устанавливайте пакет только после успешной проверки. Репозитория APT и автоматических обновлений нет: новые версии нужно скачивать и устанавливать вручную.
+
+Целевая платформа остаётся Linux Mint 22.x/Cinnamon/X11, x86_64. Проверки на Ubuntu 24.04 не заменяют испытание в целевой графической сессии. Первый запуск и ограничения описаны в [основном README](../README.md).
+
+## Условия распространения
+
+Владелец разрешил публикацию бинарного пакета для скачивания. Лицензия на проект не предоставлена; публичная доступность не даёт разрешения на перераспространение или повторное использование. Лицензия с открытым исходным кодом не выбрана.
+
+Публикация в GitHub Releases не меняет устройство пакета, поведение приложения или необходимость отдельной проверки графического интерфейса и работы с сервером в локальной сети.

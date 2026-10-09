@@ -1,24 +1,122 @@
 # Гига Писарь
 
-Русский клиент диктовки для рабочего стола GTK3/X11, работающий с сервером Giga Pisar в доверенной локальной сети. Первый установочный пакет `.deb` предназначен для Linux Mint 22.x x86_64/Cinnamon/X11; другие дистрибутивы и Wayland отдельно не проверялись. Системные зависимости GI, GTK, GStreamer и X11 указаны в пакете. Пакет не настраивает сервер, ключ, микрофон, системные сочетания клавиш или службы.
+Русскоязычное приложение для голосового ввода в Linux: запустите запись, продиктуйте текст и остановите запись — приложение отправит аудио на ваш сервер Giga Pisar и получит расшифровку. При включённой автовставке текст вставляется в исходное активное окно; его также можно скопировать кнопкой **«Копировать»**.
 
-Run from the checkout:
+Распознавание выполняется на сервере в доверенной локальной сети. Клиент не загружает модель и не распознаёт речь на рабочем компьютере.
+
+## Скачать и установить
+
+Откройте [последний выпуск](https://github.com/pavlenkoia/giga-pisar-dictation/releases/latest) и скачайте из раздела файлов пакет `.deb` для amd64 (x86_64) и контрольную сумму `SHA256SUMS`. Предыдущие версии доступны на [странице всех выпусков](https://github.com/pavlenkoia/giga-pisar-dictation/releases).
+
+Сохраните оба файла в один каталог, откройте в нём терминал и проверьте контрольную сумму:
+
+```sh
+sha256sum --check --strict SHA256SUMS
+```
+
+После успешной проверки установите пакет, подставив его точное имя вместо `имя-пакета.deb`:
+
+```sh
+sudo apt install ./имя-пакета.deb
+```
+
+Устанавливайте пакет только после успешной проверки контрольной суммы. `apt` установит необходимые системные зависимости. Исходники и ручная настройка Python для запуска установленного приложения не нужны.
+
+Целевая платформа — **Linux Mint 22.x, Cinnamon, X11, x86_64**. Wayland не поддерживается; работа на других дистрибутивах и рабочих столах отдельно не подтверждена. Сборка проверяется в GitHub Actions на Ubuntu 24.04, но это не заменяет проверку приложения в графической сессии Linux Mint.
+
+## Первый запуск
+
+1. Откройте **«Гига Писарь»** из меню приложений или командой `giga-pisar-dictation`.
+2. Если ключ API ещё не задан, приложение откроет **«Настройки»**. Укажите адрес вашего сервера Giga Pisar и ключ API.
+3. Выберите микрофон либо оставьте системный источник по умолчанию. При необходимости измените горячую клавишу и включите автовставку.
+4. Сохраните настройки и нажмите **«Проверить сервер»** в главном окне.
+5. Начните запись кнопкой **«Начать»** или сочетанием **Ctrl+Space**, затем остановите её кнопкой **«Остановить»** или тем же сочетанием.
+
+Сервер с совместимым API должен быть настроен отдельно. Пакет не устанавливает и не изменяет сервер, не содержит пользовательского ключа и не меняет настройки Cinnamon.
+
+## Возможности и поведение
+
+- Русский интерфейс, окно настроек и меню в трее.
+- Настраиваемая глобальная горячая клавиша X11; по умолчанию **Ctrl+Space**. При конфликте выберите другое сочетание или отключите его в настройках.
+- Выбор микрофона из списка доступных источников.
+- Запись моно WAV 16 кГц с ограничением в пять минут. При достижении лимита запись отменяется.
+- Отмена записи или запроса; временное аудио удаляется после завершения операции.
+- Автовставка только после проверок исходного активного окна и установленного текста. Если вставка не подтверждена, результат можно скопировать вручную.
+- Автозапуск при входе в систему — по желанию пользователя, выключен по умолчанию.
+
+Повторный запуск открывает окно уже работающего экземпляра. Крестик скрывает окно в трей, если трей доступен; для завершения используйте **«Выйти»**. В некоторых оболочках обычный щелчок по значку открывает меню — выберите **«Показать окно»**.
+
+Работающим приложением можно управлять из терминала:
+
+```sh
+giga-pisar-dictation start   # начать запись
+giga-pisar-dictation stop    # остановить запись и отправить аудио
+giga-pisar-dictation cancel  # отменить операцию
+giga-pisar-dictation toggle  # переключить запись
+giga-pisar-dictation status  # показать состояние без ключа и текста диктовки
+```
+
+Без работающего экземпляра эти команды отказываются от выполнения, а не запускают скрытую запись.
+
+## Приватность и ограничения
+
+- Ключ API хранится отдельно от настроек: по умолчанию в `~/.config/giga-pisar-dictation/api-key`, с правами `0600`. При заданном `XDG_CONFIG_HOME` используется этот каталог.
+- История аудио и расшифровок не ведётся; ключ, аудио и текст диктовки не записываются в журналы по умолчанию.
+- HTTP не шифрует ключ и аудио. Используйте его только в доверенной локальной сети; для недоверенной сети нужен защищённый доступ к серверу.
+- **Автовставка и кнопка «Копировать» заменяют содержимое буфера обмена. Прежние данные не сохраняются и не восстанавливаются.**
+- Автовставка не возвращает фокус в другое окно. Отправка команды вставки не гарантирует доставку текста в конкретное поле.
+
+Пользователь подтвердил базовую работу горячей клавиши и первой вставки. Полная проверка в целевой графической сессии — включая все гонки буфера обмена, поведение трея, автозапуск, обновление и удаление пакета — ещё не завершена.
+
+## Обновление и удаление
+
+Для обновления скачайте новый `.deb`, проверьте его контрольную сумму и установите через `sudo apt install ./имя-пакета.deb`. Настройки и ключ сохраняются. Репозитория APT и автоматических обновлений пока нет.
+
+Перед удалением отключите автозапуск в настройках и завершите приложение:
+
+```sh
+sudo apt remove giga-pisar-dictation
+```
+
+Удаление пакета не удаляет пользовательские настройки и ключ.
+
+## Запуск из исходников и сборка
+
+Для разработки нужны системные библиотеки Python GI, GTK 3, Soup 3, GStreamer и X11. Зависимости перечислены в [`packaging/deb/control.in`](packaging/deb/control.in); команды ниже сами их не устанавливают.
+
+Из корня репозитория:
 
 ```sh
 PYTHONPATH=src /usr/bin/python3 -m giga_pisar_dictation
 ```
 
-On first launch without an API key, the window opens **Настройки**. The key is stored separately in a user config directory with mode 0600. The default endpoint uses plain HTTP and is safe only on a trusted LAN. The app registers Ctrl+Space globally on X11 by default; change or disable it in **Настройки**. It does not change Cinnamon settings. Login autostart is opt-in and managed only through the app-owned XDG desktop entry. See [manual testing](docs/manual-testing.md).
+Сборка пакета без прав администратора:
 
-Build an unprivileged Mint-targeted package with `/usr/bin/python3 scripts/build-deb.py`; it writes `dist/giga-pisar-dictation_0.2.2_amd64.deb`. The installed launcher and menu entry do not require a checkout. Ordinary repeated launch shows the existing window; explicit `start`, `stop`, `cancel`, `status`, and `toggle` commands route over Gio session-bus IPC. With no running instance, commands refuse rather than silently recording. `status` excludes key and transcription content.
+```sh
+/usr/bin/python3 scripts/build-deb.py
+```
 
-Autonomous tests use adapters, fictional credentials, a local HTTP server, and a disposable D-Bus session. They do not use a microphone or mutate a real clipboard:
+Версия берётся из `pyproject.toml`; пакет появится в `dist/` с именем `giga-pisar-dictation_ВЕРСИЯ_amd64.deb`. Сборщик требует `dpkg-deb` и архитектуру x86_64, не устанавливает зависимости и не запускает приложение.
+
+## Проверки
 
 ```sh
 PYTHONPATH=src /usr/bin/python3 -m unittest discover -s tests -v
-/usr/bin/python3 -m compileall -q src tests
+/usr/bin/python3 -m compileall -q src tests scripts
 PYTHONPATH=src /usr/bin/python3 -m giga_pisar_dictation --help
 git diff --check
 ```
 
-The `.deb` has been built and checked without installing it. Owner-published binary downloads may be offered in GitHub Releases; no license is granted and download availability grants no redistribution or reuse permission. See [release instructions](docs/releases.md). Full Mint/Cinnamon/X11, tray-host, autostart-login, update/removal and LAN acceptance remains unperformed. AppIndicator hosts may show a menu on ordinary left click; **Показать окно** remains available from the menu and by launching the app. See [docs](docs/README.md) for constraints and measured results.
+Перед публикацией GitHub Actions запускает автотесты, сборку и проверки пакета. Подтверждённые результаты выпусков записаны в [документации](docs/releases.md). Автотесты используют подменённые устройства, фиктивные ключи, локальный HTTP-сервер и временную сессию D-Bus — без физического микрофона, настоящего буфера обмена и обращения к серверу в локальной сети.
+
+## Документация
+
+- [Все документы и принятые решения](docs/README.md)
+- [Выпуск пакетов через GitHub Actions](docs/releases.md)
+- [Разработка, проверки и известные ограничения](docs/development.md)
+- [Ручная настройка и сценарии проверки](docs/manual-testing.md)
+- [Контракт серверного API](docs/api-contract.md)
+
+## Лицензия
+
+Владелец публикует бинарный пакет для скачивания, но лицензия на проект не предоставлена. Публичная доступность не даёт разрешения на перераспространение или повторное использование. Лицензия с открытым исходным кодом не выбрана; условия указаны в [`packaging/deb/copyright`](packaging/deb/copyright).
