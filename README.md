@@ -8,7 +8,7 @@ Run from the checkout:
 PYTHONPATH=src /usr/bin/python3 -m giga_pisar_dictation
 ```
 
-The desktop window asks for the API base URL and key in Settings; the key is stored separately in a user config directory with mode 0600. The default endpoint uses plain HTTP and is safe only on a trusted LAN. Use Cinnamon's keyboard-shortcut settings to assign a command manually; see [manual testing](docs/manual-testing.md). The app does not register a global shortcut or change Cinnamon settings.
+The desktop window asks for the API base URL and key in Settings; the key is stored separately in a user config directory with mode 0600. The default endpoint uses plain HTTP and is safe only on a trusted LAN. The app registers Ctrl+Space globally on X11 by default; change or disable it in Settings. It does not change Cinnamon settings. See [manual testing](docs/manual-testing.md).
 
 Commands `start`, `stop`, `cancel`, `status`, and `toggle` route over the user's Gio session bus to an existing desktop instance. With no running instance, commands refuse rather than silently recording. `status` excludes key and transcription content.
 

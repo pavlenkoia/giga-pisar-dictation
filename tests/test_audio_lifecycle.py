@@ -191,7 +191,7 @@ def make_effects(directory, glib=None):
     directory.mkdir(mode=0o700, exist_ok=True)
     FakeThread.instances.clear(); events = []
     view = View(); client = FakeClient(); glib = glib or FakeGLib()
-    effects = DesktopEffects(view, config=Config(auto_insert=False), key="fictional-test-key", client=client,
+    effects = DesktopEffects(view, config=Config(auto_insert=False, hotkey_enabled=False), key="fictional-test-key", client=client,
         audio_directory=directory, recorder_factory=FakeRecorder,
         clipboard=FakeClipboard(events), x11_factory=lambda: FakeX11(events),
         glib=glib, thread_factory=FakeThread)

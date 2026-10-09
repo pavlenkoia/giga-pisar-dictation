@@ -8,10 +8,11 @@ class DesktopWindow:
     def __init__(self):
         self.window = Gtk.Window(title="Giga Pisar Dictation")
         self.window.set_default_size(460, 340)
+        self.shortcut_status = Gtk.Label(label="Global shortcut status: starting")
         self.status = Gtk.Label(label="Ready"); self.output = Gtk.TextView()
         self.output.set_wrap_mode(Gtk.WrapMode.WORD_CHAR); self.output.set_editable(False)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8); box.set_border_width(12)
-        box.pack_start(self.status, False, False, 0); box.pack_start(self.output, True, True, 0)
+        box.pack_start(self.status, False, False, 0); box.pack_start(self.shortcut_status, False, False, 0); box.pack_start(self.output, True, True, 0)
         controls = Gtk.Box(spacing=6)
         for label in ("Start", "Stop", "Cancel", "Copy", "Check server", "Settings", "Quit"):
             button = Gtk.Button(label=label); button.connect("clicked", self._button, label)
@@ -106,18 +107,22 @@ class DesktopWindow:
         dialog = Gtk.Dialog(title="Settings", transient_for=self.window, flags=0)
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL); dialog.add_button("Save", Gtk.ResponseType.OK)
         grid = Gtk.Grid(column_spacing=8, row_spacing=8, margin=12)
+        shortcut_state = Gtk.Label(label=self.effects.shortcut_status)
         url = Gtk.Entry(); url.set_text(self.effects.config.base_url)
         timeout = Gtk.SpinButton.new_with_range(1, 3600, 1); timeout.set_value(self.effects.config.timeout_seconds)
         source = Gtk.Entry(); source.set_text(self.effects.config.audio_source)
         key = Gtk.Entry(); key.set_visibility(False); key.set_placeholder_text("Leave blank to keep existing key")
         auto = Gtk.CheckButton(label="Insert automatically only into original active X11 window")
         auto.set_active(self.effects.config.auto_insert)
-        for row, (label, widget) in enumerate((("API base URL", url), ("Timeout (seconds)", timeout), ("Audio source", source), ("API key", key), ("", auto))):
+        hotkey_enabled = Gtk.CheckButton(label="Enable global X11 shortcut")
+        hotkey_enabled.set_active(self.effects.config.hotkey_enabled)
+        hotkey = Gtk.Entry(); hotkey.set_text(self.effects.config.hotkey_accelerator)
+        for row, (label, widget) in enumerate((("Shortcut status", shortcut_state), ("API base URL", url), ("Timeout (seconds)", timeout), ("Audio source", source), ("API key", key), ("", auto), ("", hotkey_enabled), ("Shortcut (e.g. Ctrl+Space)", hotkey))):
             grid.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1); grid.attach(widget, 1, row, 1, 1)
         dialog.get_content_area().add(grid); dialog.show_all()
         if dialog.run() == Gtk.ResponseType.OK:
-            try: self.effects.save_settings(url.get_text(), timeout.get_value_as_int(), source.get_text(), key.get_text(), auto.get_active())
-            except (ValueError, PermissionError, OSError): self.status.set_text("Settings rejected; check URL and private config permissions")
+            try: self.effects.save_settings(url.get_text(), timeout.get_value_as_int(), source.get_text(), key.get_text(), auto.get_active(), hotkey_enabled.get_active(), hotkey.get_text())
+            except (ValueError, PermissionError, OSError, RuntimeError): self.status.set_text("Settings rejected; shortcut may be unavailable or config permissions invalid")
         dialog.destroy()
 
 

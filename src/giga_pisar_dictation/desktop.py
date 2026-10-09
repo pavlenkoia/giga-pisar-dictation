@@ -16,9 +16,14 @@ from .x11 import X11Adapter
 class DesktopEffects:
     def __init__(self, view, *, config=None, key=None, client=None, audio_directory=None,
                  wav_factory=PrivateWav, recorder_factory=GstRecorder, clipboard=None,
-                 x11_factory=X11Adapter, glib=GLib, thread_factory=threading.Thread):
+                 x11_factory=X11Adapter, glib=GLib, thread_factory=threading.Thread,
+                 hotkey_factory=None, config_saver=None, key_saver=None):
         self.view = view
         self.glib, self.thread_factory = glib, thread_factory
+        self.hotkey_factory = hotkey_factory
+        self.config_saver, self.key_saver = config_saver, key_saver
+        self.shortcut_status = "Shortcut disabled"
+        self.shortcut_healthy = False
         self.wav_factory, self.recorder_factory = wav_factory, recorder_factory
         self.config = config or load_config()
         self.key = load_api_key() if key is None else key
@@ -30,25 +35,67 @@ class DesktopEffects:
         except RuntimeError: self.x11 = None
         self.target = None; self.wav = None; self.recorder = None; self.cancellable = None
         self.recording_generation = 0
-        self.view.status.set_text("WARNING: HTTP does not encrypt the API key or audio; trusted LAN only")
+        self.hotkey = None
+        self._register_hotkey()
+        if hasattr(self.view, "shortcut_status"): self.view.shortcut_status.set_text(self.shortcut_status)
+        self.view.status.set_text("WARNING: HTTP does not encrypt the API key or audio; trusted LAN only; " + self.shortcut_status)
+
+    def _register_hotkey(self):
+        if not self.config.hotkey_enabled: return
+        try:
+            from .hotkey import X11Hotkey
+            factory = self.hotkey_factory or X11Hotkey
+            self.hotkey = factory(self.config.hotkey_accelerator, self._hotkey_toggle,
+                                  glib=self.glib, target_at_press=lambda: self.x11.active_window() if self.x11 else None,
+                                  on_error=self._hotkey_error, on_status=self._hotkey_status_changed)
+            self.shortcut_healthy = getattr(self.hotkey, "healthy", True)
+            self.shortcut_status = ("Global shortcut active: " + self.config.hotkey_accelerator
+                                    if self.shortcut_healthy else "Global shortcut unavailable after X11 keymap change")
+        except Exception:
+            self.hotkey = None
+            self.shortcut_healthy = False
+            self.shortcut_status = "Global shortcut unavailable; choose another shortcut in Settings"
+
+    def _hotkey_status_changed(self, healthy, accelerator=None):
+        self.shortcut_healthy = bool(healthy)
+        if self.shortcut_healthy:
+            self.shortcut_status = "Global shortcut active: " + (accelerator or self.config.hotkey_accelerator)
+        else:
+            self.shortcut_status = "Global shortcut unavailable after X11 keymap change"
+        if hasattr(self.view, "shortcut_status"): self.view.shortcut_status.set_text(self.shortcut_status)
+
+    def _hotkey_error(self, _message):
+        self._hotkey_status_changed(False)
+
+    def _hotkey_toggle(self, target=None):
+        starting = self.view.controller.state in (State.IDLE, State.RESULT, State.ERROR)
+        if starting:
+            self.target = target
+        self._hotkey_target_pending = starting
+        result = self.command("toggle")
+        if not result.get("ok"): self._hotkey_target_pending = False
+        return GLib.SOURCE_REMOVE
 
     def start_recording(self):
         if not self.client: raise RuntimeError("API key is not configured")
-        active = self.x11.active_window() if self.x11 else None
+        target_captured = getattr(self, "_hotkey_target_pending", False)
+        active = None if target_captured else (self.x11.active_window() if self.x11 else None)
+        self._hotkey_target_pending = False
         own = None
         try:
             gi.require_version("GdkX11", "3.0")
             from gi.repository import GdkX11
             own = self.view.window.get_window().get_xid()
         except Exception: pass
-        self.target = active if active and active != own else self.view.external_window
+        if not target_captured:
+            self.target = active if active and active != own else self.view.external_window
         self.wav = self.wav_factory(self.audio_directory)
         self.recording_generation += 1
         generation = self.recording_generation
         self.recorder = self.recorder_factory(self.wav.path, self.config.audio_source,
                                               lambda: self._audio_error(generation))
         self.limit_source = self.glib.timeout_add_seconds(300, lambda: self._recording_limit(generation))
-        self.view.status.set_text("WARNING: plain HTTP exposes the Bearer key on trusted LAN; recording")
+        self.view.status.set_text("WARNING: plain HTTP exposes the Bearer key on trusted LAN; recording; " + self.shortcut_status)
 
     def _audio_error(self, generation):
         if generation == self.recording_generation and self.view.controller.state == State.RECORDING:
@@ -139,24 +186,76 @@ class DesktopEffects:
             "WARNING: unencrypted HTTP; server reachable" if not error else
             "WARNING: unencrypted HTTP; " + str(error)))
 
-    def save_settings(self, url, timeout, source, key, auto_insert):
+    def save_settings(self, url, timeout, source, key, auto_insert, hotkey_enabled=True, hotkey_accelerator="Ctrl+Space"):
         from .config import save_api_key, save_config
-        from .config import config_dir
+        saver = self.config_saver or save_config
+        key_saver = self.key_saver or save_api_key
         new_config = replace(self.config, base_url=url.strip(), timeout_seconds=timeout,
-                             audio_source=source.strip(), auto_insert=bool(auto_insert))
+                             audio_source=source.strip(), auto_insert=bool(auto_insert),
+                             hotkey_enabled=bool(hotkey_enabled), hotkey_accelerator=hotkey_accelerator.strip())
         new_config.validate()
-        save_config(new_config)
-        if key: save_api_key(key)
+        old_config = self.config
+        old_hotkey = self.hotkey
+        changed_registration = False
+        new_registration = None
+        if new_config.hotkey_enabled:
+            if old_hotkey:
+                if new_config.hotkey_accelerator != old_config.hotkey_accelerator:
+                    changed_registration = old_hotkey.prepare_rebind(new_config.hotkey_accelerator)
+            elif self.hotkey_factory:
+                new_registration = self.hotkey_factory(new_config.hotkey_accelerator, self._hotkey_toggle,
+                    glib=self.glib, target_at_press=lambda: self.x11.active_window() if self.x11 else None,
+                    on_error=None, on_status=None)
+            else:
+                from .hotkey import X11Hotkey
+                new_registration = X11Hotkey(new_config.hotkey_accelerator, self._hotkey_toggle,
+                    glib=self.glib, target_at_press=lambda: self.x11.active_window() if self.x11 else None,
+                    on_error=None, on_status=None)
+        try:
+            if key: key_saver(key)
+            saver(new_config)
+        except Exception:
+            if changed_registration and old_hotkey:
+                old_hotkey.rollback_rebind()
+            if new_registration: new_registration.close()
+            raise
+        if changed_registration and old_hotkey: old_hotkey.commit_rebind()
+        if not new_config.hotkey_enabled and old_hotkey:
+            old_hotkey.close(); self.hotkey = None
+        elif new_registration:
+            self.hotkey = new_registration
+            if hasattr(new_registration,"on_error"): new_registration.on_error=self._hotkey_error
+            if hasattr(new_registration,"on_status"): new_registration.on_status=self._hotkey_status_changed
         self.config = new_config
+        if not new_config.hotkey_enabled:
+            self.shortcut_healthy = False
+            self.shortcut_status = "Global shortcut disabled"
+        elif new_registration:
+            self.shortcut_healthy = getattr(new_registration,"healthy",True)
+            self.shortcut_status = ("Global shortcut active: " + new_config.hotkey_accelerator
+                                    if self.shortcut_healthy else "Global shortcut unavailable after X11 keymap change")
+        elif changed_registration:
+            self.shortcut_healthy = True
+            self.shortcut_status = "Global shortcut active: " + new_config.hotkey_accelerator
+        elif old_hotkey:
+            self.shortcut_healthy = getattr(old_hotkey,"healthy",self.shortcut_healthy)
+            self.shortcut_status = ("Global shortcut active: " + new_config.hotkey_accelerator
+                                    if self.shortcut_healthy else "Global shortcut unavailable after X11 keymap change")
+        else:
+            self.shortcut_healthy = False
+            self.shortcut_status = "Global shortcut unavailable; choose another shortcut in Settings"
         self.key = load_api_key()
         self.client = ApiClient(self.config.base_url, self.key, self.config.timeout_seconds) if self.key else None
-        self.view.status.set_text("Settings saved; WARNING: HTTP sends the Bearer key in cleartext on trusted LAN")
+        if hasattr(self.view, "shortcut_status"): self.view.shortcut_status.set_text(self.shortcut_status)
+        self.view.status.set_text("Settings saved; WARNING: HTTP sends the Bearer key in cleartext on trusted LAN; " + self.shortcut_status)
 
     def shutdown(self):
         if self.cancellable: self.cancellable.cancel()
         if self.view.controller.state not in (State.IDLE, State.RESULT, State.ERROR):
             self.view.controller.cancel()
         self.remove_audio()
+        if self.hotkey:
+            self.hotkey.close(); self.hotkey = None
         self.clipboard.shutdown()
         if self.x11:
             self.x11.close(); self.x11 = None

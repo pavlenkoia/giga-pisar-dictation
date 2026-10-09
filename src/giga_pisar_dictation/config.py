@@ -19,12 +19,18 @@ class Config:
     timeout_seconds: int = 120
     audio_source: str = ""
     auto_insert: bool = True
+    hotkey_enabled: bool = True
+    hotkey_accelerator: str = "Ctrl+Space"
 
     def validate(self):
         parts = urlsplit(self.base_url)
         if (parts.scheme not in ("http", "https") or not parts.hostname or parts.username is not None or
                 parts.password is not None or parts.query or parts.fragment): raise ValueError("Invalid API base URL")
         if not 1 <= self.timeout_seconds <= 3600: raise ValueError("Timeout must be between 1 and 3600 seconds")
+        if not isinstance(self.hotkey_enabled, bool): raise ValueError("Invalid shortcut enabled setting")
+        if not isinstance(self.hotkey_accelerator, str): raise ValueError("Invalid shortcut accelerator")
+        from .hotkey import parse_accelerator
+        parse_accelerator(self.hotkey_accelerator)
 
 
 def config_dir():

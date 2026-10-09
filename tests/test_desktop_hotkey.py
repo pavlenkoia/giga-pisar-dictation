@@ -1,0 +1,206 @@
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+from giga_pisar_dictation.config import Config
+from giga_pisar_dictation.desktop import DesktopEffects
+from giga_pisar_dictation.controller import State
+from giga_pisar_dictation.hotkey import X11Hotkey
+from tests.test_hotkey import FakeBackend, FakeGLib
+
+
+class Label:
+    def set_text(self,text): self.text=text
+class View:
+    def __init__(self): self.status=Label(); self.shortcut_status=Label(); self.external_window=41
+    def refresh(self): pass
+class FakeX:
+    def active_window(self): return 91
+    def close(self): pass
+class Clipboard:
+    def shutdown(self): pass
+class Hotkey:
+    def __init__(self, accelerator="Ctrl+Space", fail=None): self.accelerator=accelerator; self.fail=fail; self.closed=False; self.rebinds=[]
+    def prepare_rebind(self,value):
+        self.rebinds.append(value)
+        if self.fail==value: raise RuntimeError("conflict")
+        if value==self.accelerator:return False
+        self.prepared=value; return True
+    def commit_rebind(self): self.accelerator=self.prepared; del self.prepared
+    def rollback_rebind(self):
+        if hasattr(self,"prepared"):del self.prepared
+    def rebind(self,value):
+        changed=self.prepare_rebind(value)
+        if changed:self.commit_rebind()
+        return changed
+    def close(self):self.closed=True
+
+class DesktopSettingsTests(unittest.TestCase):
+    def make(self,config=None,hotkey=None,saver=None):
+        effects=DesktopEffects.__new__(DesktopEffects)
+        effects.config=config or Config(); effects.hotkey=hotkey; effects.hotkey_factory=None
+        effects.shortcut_healthy=getattr(hotkey,"healthy",bool(hotkey))
+        effects.config_saver=saver or (lambda cfg:None); effects.key_saver=lambda key:None
+        effects.view=View(); effects.x11=None; effects.glib=object(); effects.shortcut_status="old"
+        effects.client=None; effects.key=""
+        return effects
+    @patch("giga_pisar_dictation.desktop.load_api_key",return_value="")
+    def test_successful_rebind_disable_enable_and_same_binding(self,_):
+        old=Hotkey(); e=self.make(hotkey=old)
+        e.save_settings(Config().base_url,120,"","",True,True,"Ctrl+Space")
+        self.assertEqual(old.rebinds,[])
+        e.save_settings(Config().base_url,120,"","",True,True,"Ctrl+a")
+        self.assertEqual(old.accelerator,"Ctrl+a"); self.assertEqual(e.config.hotkey_accelerator,"Ctrl+a")
+        e.save_settings(Config().base_url,120,"","",True,False,"Ctrl+a")
+        self.assertTrue(old.closed); self.assertIsNone(e.hotkey)
+        e.hotkey_factory=lambda accelerator,*args,**kwargs:Hotkey(accelerator)
+        e.save_settings(Config().base_url,120,"","",True,True,"Ctrl+a")
+        self.assertEqual(e.hotkey.accelerator,"Ctrl+a")
+    @patch("giga_pisar_dictation.desktop.load_api_key",return_value="")
+    def test_save_failure_and_commit_preserve_overlapping_physical_grabs(self,_):
+        class GLib:
+            IO_IN=1; PRIORITY_DEFAULT=0
+            def io_add_watch(self,*args):return 1
+            def timeout_add(self,*args):return 2
+            def source_remove(self,*args):pass
+        class Backend:
+            def __init__(self):self.grabs=set();self.masks=(0,2,16,18);self.mapping={ord("1"):65,ord("!"):65}
+            def keycode(self,sym):return self.mapping.get(sym,65 if sym==32 else 0)
+            def modifier_mask(self,names):return 4
+            def lock_masks(self):return self.masks
+            def active_window(self):return 73
+            def grab_entries(self,entries):self.grabs.update(entries)
+            def ungrab_entries(self,entries):self.grabs.difference_update(entries)
+            def sync(self):pass
+            def pending(self):return False
+            def select_mapping(self):pass
+            def fd(self):return 9
+            def close(self):pass
+        backend=Backend(); hotkey=X11Hotkey("Ctrl+1",lambda *_:None,glib=GLib(),backend=backend)
+        original=backend.grabs.copy(); e=self.make(config=Config(hotkey_accelerator="Ctrl+1"),hotkey=hotkey)
+        e.glib=GLib()
+        backend.masks=(0,2,32,34)
+        e.config_saver=lambda _config:(_ for _ in ()).throw(OSError("disk full"))
+        with self.assertRaises(OSError):e.save_settings(Config().base_url,120,"","",True,True,"Ctrl+!")
+        self.assertEqual(backend.grabs,original); self.assertEqual(hotkey.accelerator,"Ctrl+1")
+        e.config_saver=lambda _config:None
+        e.save_settings(Config().base_url,120,"","",True,True,"Ctrl+!")
+        self.assertEqual(backend.grabs,{(65,4),(65,6),(65,36),(65,38)})
+        self.assertEqual(hotkey.accelerator,"Ctrl+!")
+        hotkey.close()
+
+    def test_prepare_conflict_and_save_rollback_clear_old_cycle_and_allow_fresh_chord(self):
+        backend=FakeBackend(); dispatch=[]
+        hotkey=X11Hotkey("Ctrl+Space",dispatch.append,glib=FakeGLib(),backend=backend)
+        effects=self.make(config=Config(),hotkey=hotkey); effects.glib=FakeGLib()
+        effects.config_saver=lambda _config:(_ for _ in ()).throw(OSError("disk full"))
+        backend.on_sync=lambda b:b.events.append(b.event(3,65))
+        hotkey.gate.press(4,4)
+        with patch("giga_pisar_dictation.desktop.load_api_key",return_value=""):
+            with self.assertRaises(OSError):effects.save_settings(Config().base_url,120,"","",True,True,"Ctrl+!")
+        self.assertFalse(hotkey.gate.down); self.assertFalse(hotkey.gate.wait_release)
+        del backend.on_sync
+        backend.events=[backend.event(2,65),backend.event(3,65)]; hotkey._ready(9,1); hotkey._poll_release()
+        self.assertEqual(dispatch,[17])
+        hotkey.gate.press(4,4); backend.external.add((38,4))
+        with patch("giga_pisar_dictation.desktop.load_api_key",return_value=""):
+            with self.assertRaises(RuntimeError):effects.save_settings(Config().base_url,120,"","",True,True,"Ctrl+a")
+        self.assertFalse(hotkey.gate.down); self.assertFalse(hotkey.gate.wait_release)
+        backend.external.clear(); backend.events=[backend.event(2,65),backend.event(3,65)]
+        hotkey._ready(9,1); hotkey._poll_release()
+        self.assertEqual(dispatch,[17,17]); hotkey.close()
+
+    def test_mapping_health_survives_unchanged_save_and_recovers_after_successful_mapping(self):
+        backend=FakeBackend(); effects=self.make(config=Config())
+        hotkey=X11Hotkey("Ctrl+Space",lambda *_:None,glib=FakeGLib(),backend=backend,
+                         on_error=effects._hotkey_error,on_status=effects._hotkey_status_changed)
+        effects.hotkey=hotkey; effects.shortcut_healthy=True; effects.shortcut_status="Global shortcut active: Ctrl+Space"
+        backend.mapping[32]=66; backend.external.add((66,4)); backend.events=[backend.event(34)]
+        hotkey._ready(9,1)
+        self.assertFalse(hotkey.healthy); self.assertFalse(effects.shortcut_healthy)
+        self.assertIn("unavailable",effects.shortcut_status)
+        effects.config_saver=lambda _config:None
+        with patch("giga_pisar_dictation.desktop.load_api_key",return_value=""):
+            effects.save_settings(Config().base_url,120,"","",True,True,"Ctrl+Space")
+        self.assertFalse(effects.shortcut_healthy); self.assertIn("unavailable",effects.shortcut_status)
+        backend.external.clear(); backend.events=[backend.event(34)]; hotkey._ready(9,1)
+        self.assertTrue(hotkey.healthy); self.assertTrue(effects.shortcut_healthy)
+        self.assertEqual(effects.shortcut_status,"Global shortcut active: Ctrl+Space")
+        hotkey.close()
+
+    @patch("giga_pisar_dictation.desktop.load_api_key",return_value="")
+    def test_conflicting_rebind_and_save_failure_restore_working_binding(self,_):
+        old=Hotkey(fail="Ctrl+a"); e=self.make(hotkey=old)
+        with self.assertRaises(RuntimeError):e.save_settings(Config().base_url,120,"","",True,True,"Ctrl+a")
+        self.assertEqual(e.config.hotkey_accelerator,"Ctrl+Space"); self.assertFalse(old.closed)
+        old.fail=None
+        def fail_save(cfg):raise OSError("disk full")
+        e.config_saver=fail_save
+        with self.assertRaises(OSError):e.save_settings(Config().base_url,120,"","",True,True,"Ctrl+a")
+        self.assertEqual(old.accelerator,"Ctrl+Space"); self.assertEqual(e.config.hotkey_accelerator,"Ctrl+Space")
+    def test_hotkey_target_is_captured_from_keypress_and_not_replaced_by_startup_probe(self):
+        effects=self.make(hotkey=Hotkey())
+        effects.view.controller=type("Controller",(),{"state":State.IDLE})()
+        calls=[]; effects.command=lambda name:(calls.append(name) or {"ok":True})
+        effects._hotkey_toggle(73)
+        self.assertEqual(effects.target,73); self.assertTrue(effects._hotkey_target_pending)
+        effects.view.controller.state=State.RECORDING
+        effects._hotkey_toggle(88)
+        self.assertEqual(effects.target,73); self.assertFalse(effects._hotkey_target_pending)
+        effects.view.controller.state=State.REQUESTING
+        effects._hotkey_toggle(99)
+        self.assertEqual(effects.target,73); self.assertFalse(effects._hotkey_target_pending)
+        self.assertEqual(calls,["toggle","toggle","toggle"])
+    def test_response_inserts_only_to_press_target_and_refuses_after_focus_switch(self):
+        class Controller:
+            state=State.REQUESTING; _request_generation=7
+            def response(self,text,generation):self.text=text;self.state=State.RESULT;return True
+        class Paste:
+            def __init__(self):self.targets=[]
+            def paste_safely(self,text,x11,target,modifiers):
+                self.targets.append(target);return x11.active_window()==target
+        class TargetX:
+            current=73
+            def active_window(self):return self.current
+        effects=self.make(hotkey=Hotkey()); effects.config=Config(auto_insert=True)
+        effects.view.controller=Controller(); effects.view.modifiers_down=lambda:False
+        effects.x11=TargetX(); effects.target=73; effects.clipboard=Paste()
+        effects._response("dictation",None,7)
+        self.assertEqual(effects.clipboard.targets,[73])
+        effects.view.controller.state=State.REQUESTING; effects.view.controller._request_generation=8
+        effects.target=73; effects.x11.current=88
+        effects._response("later",None,8)
+        self.assertEqual(effects.clipboard.targets,[73,73])
+        self.assertIn("not inserted",effects.view.status.text)
+    def test_start_recording_keeps_hotkey_press_target(self):
+        effects=self.make(hotkey=Hotkey()); effects.client=object(); effects.target=73; effects._hotkey_target_pending=True
+        effects.recording_generation=0
+        effects.x11=FakeX()
+        effects.audio_directory=Path("/tmp")
+        effects.wav_factory=lambda _directory:type("Wav",(),{"path":"unused"})()
+        effects.recorder_factory=lambda *args:type("Recorder",(),{"cancel":lambda self:None})()
+        effects.glib=type("GLib",(),{"timeout_add_seconds":lambda self,seconds,callback:1})()
+        effects.start_recording()
+        self.assertEqual(effects.target,73); self.assertFalse(effects._hotkey_target_pending)
+    def test_failed_enable_does_not_report_uncommitted_candidate_active(self):
+        e=self.make(config=Config(hotkey_enabled=False)); e.shortcut_healthy=False
+        e.shortcut_status="Global shortcut disabled"
+        candidate=Hotkey()
+        def factory(accelerator,*args,on_status=None,**kwargs):
+            if on_status:on_status(True,accelerator)
+            return candidate
+        e.hotkey_factory=factory
+        e.config_saver=lambda _config:(_ for _ in ()).throw(OSError("disk full"))
+        with patch("giga_pisar_dictation.desktop.load_api_key",return_value=""):
+            with self.assertRaises(OSError):e.save_settings(Config().base_url,120,"","",True,True,"Ctrl+Space")
+        self.assertTrue(candidate.closed); self.assertIsNone(e.hotkey)
+        self.assertEqual(e.shortcut_status,"Global shortcut disabled")
+        self.assertFalse(e.shortcut_healthy)
+    def test_disabled_config_save_failure_does_not_close_hotkey(self):
+        old=Hotkey(); e=self.make(hotkey=old,saver=lambda cfg:(_ for _ in ()).throw(OSError("disk")))
+        with patch("giga_pisar_dictation.desktop.load_api_key",return_value=""):
+            with self.assertRaises(OSError):e.save_settings(Config().base_url,120,"","",True,False,"Ctrl+Space")
+        self.assertFalse(old.closed); self.assertTrue(e.config.hotkey_enabled)
+
+
+if __name__=="__main__":unittest.main()

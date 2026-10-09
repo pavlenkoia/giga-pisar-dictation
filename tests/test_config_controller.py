@@ -31,7 +31,17 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(d.stat().st_mode), 0o700)
             self.assertEqual(load_config(d), Config())
             self.assertEqual(load_api_key(d), "fictional-test-key")
-            self.assertNotIn("key", (d / "config.json").read_text())
+            self.assertNotIn("api_key", (d / "config.json").read_text())
+
+    def test_legacy_config_defaults_shortcut_fields_and_invalid_shortcuts_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d=Path(tmp)/"cfg"; d.mkdir(mode=0o700)
+            (d/"config.json").write_text('{"base_url":"http://192.168.0.30:8737","timeout_seconds":120,"audio_source":"","auto_insert":true}')
+            os.chmod(d/"config.json",0o600)
+            legacy=load_config(d)
+            self.assertTrue(legacy.hotkey_enabled); self.assertEqual(legacy.hotkey_accelerator,"Ctrl+Space")
+            with self.assertRaises(ValueError):Config(hotkey_accelerator=42).validate()
+            with self.assertRaises(ValueError):Config(hotkey_accelerator="Space").validate()
 
     def test_rejects_permissions_symlinks_unsafe_parent_urls(self):
         with tempfile.TemporaryDirectory() as tmp:
