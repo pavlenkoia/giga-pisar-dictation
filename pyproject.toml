@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "giga-pisar-dictation"
+version = "0.1.0"
+description = "Linux X11 desktop client for a trusted-LAN Giga Pisar API"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+giga-pisar-dictation = "giga_pisar_dictation.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
