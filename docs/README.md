@@ -3,11 +3,12 @@
 ## Документы и статус
 
 - [Исходная спецификация](initial-spec.md) — предварительный исторический черновик; рекомендации в ней не подменяют принятые решения.
-- [Принятые требования](requirements.md) — scope и safety boundaries.
+- [Принятые требования](requirements.md) — scope, safety boundaries и реализованное поведение первого `.deb`-выпуска; целевая desktop-приёмка ещё не выполнена.
 - [ADR 0001](decisions/0001-desktop-prototype.md) — стек и архитектура; shortcut прежнего решения superseded.
 - [ADR 0002](decisions/0002-built-in-x11-shortcut.md) — встроенный глобальный X11 shortcut.
+- [ADR 0003](decisions/0003-desktop-deb-release.md) — первый устанавливаемый desktop `.deb`, lifecycle, tray и пользовательский autostart.
 - [API contract](api-contract.md) — multipart, health и ошибки.
-- [Разработка](development.md) — локальные проверки и фактические результаты.
+- [Разработка](development.md) — локальные проверки, фактические результаты сборки и известные ограничения.
 - [Ручная настройка и тестирование](manual-testing.md) — shortcut и целевой сценарий.
 
 Базовую работу встроенного shortcut пользователь проверил и подтвердил. План shortcut закрыт с согласованным P2-ограничением (см. development.md). Полная LAN/GTK/X11 приёмка и все ручные edge-case сценарии не подтверждены; моки и локальные тесты не заменяют desktop acceptance.

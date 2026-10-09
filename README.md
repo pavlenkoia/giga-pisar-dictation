@@ -1,6 +1,6 @@
 # Giga Pisar Dictation
 
-GTK3/X11 client prototype for dictation to a user-managed Giga Pisar server on a trusted LAN. Requires system Python GI bindings for GTK 3, Gio, Soup 3, and GStreamer 1.0 plus the GStreamer PulseAudio source, WAV encoder, and X11/XTest libraries. No install or service configuration is performed by this repository.
+GTK3/X11 desktop client for dictation to a user-managed Giga Pisar server on a trusted LAN. The first installable `.deb` targets Linux Mint 22.x x86_64/Cinnamon/X11; other distributions and Wayland are not supported without separate testing. System GI, GTK, GStreamer and X11 dependencies are declared by the package. No server, key, microphone, system shortcut or service configuration is performed by the package.
 
 Run from the checkout:
 
@@ -8,9 +8,9 @@ Run from the checkout:
 PYTHONPATH=src /usr/bin/python3 -m giga_pisar_dictation
 ```
 
-The desktop window asks for the API base URL and key in Settings; the key is stored separately in a user config directory with mode 0600. The default endpoint uses plain HTTP and is safe only on a trusted LAN. The app registers Ctrl+Space globally on X11 by default; change or disable it in Settings. It does not change Cinnamon settings. See [manual testing](docs/manual-testing.md).
+On first launch without an API key, the window opens Settings. The key is stored separately in a user config directory with mode 0600. The default endpoint uses plain HTTP and is safe only on a trusted LAN. The app registers Ctrl+Space globally on X11 by default; change or disable it in Settings. It does not change Cinnamon settings. Login autostart is opt-in and managed only through the app-owned XDG desktop entry. See [manual testing](docs/manual-testing.md).
 
-Commands `start`, `stop`, `cancel`, `status`, and `toggle` route over the user's Gio session bus to an existing desktop instance. With no running instance, commands refuse rather than silently recording. `status` excludes key and transcription content.
+Build an unprivileged Mint-targeted package with `/usr/bin/python3 scripts/build-deb.py`; it writes `dist/giga-pisar-dictation_0.2.1_amd64.deb`. The installed launcher and menu entry do not require a checkout. Ordinary repeated launch shows the existing window; explicit `start`, `stop`, `cancel`, `status`, and `toggle` commands route over Gio session-bus IPC. With no running instance, commands refuse rather than silently recording. `status` excludes key and transcription content.
 
 Autonomous tests use adapters, fictional credentials, a local HTTP server, and a disposable D-Bus session. They do not use a microphone or mutate a real clipboard:
 
@@ -21,4 +21,4 @@ PYTHONPATH=src /usr/bin/python3 -m giga_pisar_dictation --help
 git diff --check
 ```
 
-This prototype has not been accepted through the target Cinnamon/X11 desktop and LAN scenario. See [docs](docs/README.md) for constraints and status.
+The `.deb` has been built and checked without installing it. Full Mint/Cinnamon/X11, tray-host, autostart-login, update/removal and LAN acceptance remains unperformed. AppIndicator hosts may show a menu on ordinary left click; Show window remains available from the menu and by launching the app. See [docs](docs/README.md) for constraints and measured results.

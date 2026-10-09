@@ -1,23 +1,23 @@
-"""Isolated D-Bus fixture used only by test_ipc_dbus."""
+"""Production Gio router with inert callbacks for isolated IPC tests."""
 import sys
-from pathlib import Path
 import gi
+
 gi.require_version("Gio", "2.0")
-from gi.repository import Gio, GLib
+from gi.repository import Gio
 
-from giga_pisar_dictation.app import APP_ID
+from giga_pisar_dictation.app import CommandApplication
 
-ready, received = map(Path, sys.argv[1:3])
-app = Gio.Application(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+ready, received = sys.argv[1:3]
 
-def command_line(application, command_line):
-    args = command_line.get_arguments()[1:]
-    if not command_line.get_is_remote():
-        application.hold(); ready.write_text("ready")
-        return 0
-    received.write_text(" ".join(args))
-    command_line.print_literal('{"ok":true}\n')
-    return 0
+def on_command(command):
+    with open(received, "a", encoding="utf-8") as stream:
+        stream.write(f"command:{command}\n")
+    return {"ok": True}
 
-app.connect("command-line", command_line)
-app.run([sys.argv[0]])
+def on_launch(mode):
+    with open(received, "a", encoding="utf-8") as stream:
+        stream.write(f"launch:{mode}\n")
+
+router = CommandApplication(on_command, on_launch)
+router.application.connect("startup", lambda app: (app.hold(), open(ready, "w").close()))
+router.run([sys.argv[0]])

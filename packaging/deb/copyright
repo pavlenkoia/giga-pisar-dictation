@@ -1,0 +1,9 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Giga Pisar Dictation
+Source: local personal package
+
+Files: *
+Copyright: Copyright holder not specified
+License: not-licensed
+ No license is granted. This package is for personal use only. This notice
+ does not grant permission for redistribution or reuse.

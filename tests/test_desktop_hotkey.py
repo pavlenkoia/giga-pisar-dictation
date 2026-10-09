@@ -41,7 +41,7 @@ class DesktopSettingsTests(unittest.TestCase):
         effects.config=config or Config(); effects.hotkey=hotkey; effects.hotkey_factory=None
         effects.shortcut_healthy=getattr(hotkey,"healthy",bool(hotkey))
         effects.config_saver=saver or (lambda cfg:None); effects.key_saver=lambda key:None
-        effects.view=View(); effects.x11=None; effects.glib=object(); effects.shortcut_status="old"
+        effects.view=View(); effects.x11=FakeX(); effects.glib=object(); effects.shortcut_status="old"
         effects.client=None; effects.key=""
         return effects
     @patch("giga_pisar_dictation.desktop.load_api_key",return_value="")

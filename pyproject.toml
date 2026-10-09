@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "giga-pisar-dictation"
-version = "0.1.0"
+version = "0.2.1"
 description = "Linux X11 desktop client for a trusted-LAN Giga Pisar API"
 requires-python = ">=3.10"
 dependencies = []

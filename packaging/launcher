@@ -1,0 +1,3 @@
+#!/bin/sh
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec /usr/bin/python3 -c 'import sys; libdir, *args = sys.argv[1:]; sys.path.insert(0, libdir); sys.argv[0] = "giga-pisar-dictation"; from giga_pisar_dictation.__main__ import main; raise SystemExit(main(args))' "$SCRIPT_DIR/../lib/giga-pisar-dictation" "$@"

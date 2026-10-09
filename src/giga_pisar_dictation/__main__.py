@@ -13,18 +13,31 @@ def main(argv=None):
     desktop = {}
     try:
         from .app import CommandApplication
-        def launch():
+        def launch(mode="ordinary"):
             import gi
             gi.require_version("Gtk", "3.0")
             from gi.repository import Gtk
             from .gui import DesktopWindow
             from .desktop import DesktopController
-            window = DesktopWindow(); DesktopController(window); desktop["window"] = window
+            try:
+                window = DesktopWindow(); DesktopController(window); desktop["window"] = window
+            except (OSError, ValueError, PermissionError):
+                dialog = Gtk.MessageDialog(message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.CLOSE,
+                                           text="Unable to read application settings")
+                dialog.format_secondary_text("Check the ownership and permissions of the private configuration files.")
+                dialog.run(); dialog.destroy()
+                return
+            from gi.repository import GLib
+            GLib.idle_add(window.apply_launch_mode, mode)
             try: Gtk.main()
             finally: window.effects.shutdown()
         def command(name):
-            effects = getattr(desktop.get("window"), "effects", None)
+            window = desktop.get("window")
+            effects = getattr(window, "effects", None)
             if effects is None: return {"ok": False, "status": "desktop unavailable"}
+            if name == "show":
+                window.window.show_all(); window.window.present()
+                return {"ok": True, "status": "shown"}
             return effects.command(name)
         return CommandApplication(command, launch).run([sys.argv[0], *argv])
     except Exception:

@@ -211,6 +211,27 @@ class DesktopRecordingTests(unittest.TestCase):
             self.assertFalse(wav.exists()); self.assertEqual(client.calls, [])
             self.assertIn("discarded", view.status.text)
 
+    def test_recording_limit_refreshes_idle_indicator_after_cancel_cleanup(self):
+        from giga_pisar_dictation.gui import DesktopWindow
+        class Buffer:
+            def set_text(self, text): self.text = text
+        class Output:
+            def __init__(self): self.buffer = Buffer()
+            def get_buffer(self): return self.buffer
+        class Indicator:
+            def set_icon_full(self, icon, _description): self.icon = icon
+            def set_title(self, title): self.title = title
+        with tempfile.TemporaryDirectory() as tmp:
+            effects, view, _client, _glib, _events = make_effects(Path(tmp) / "audio")
+            view.output = Output(); view.indicator = Indicator()
+            view.refresh = lambda: DesktopWindow.refresh(view)
+            self.assertTrue(effects.command("start")["ok"])
+            self.assertEqual(view.indicator.icon, "giga-pisar-dictation-recording")
+            effects._recording_limit(effects.recording_generation)
+            self.assertEqual(view.controller.state, State.IDLE)
+            self.assertEqual(view.indicator.icon, "giga-pisar-dictation-idle")
+            self.assertEqual(view.status.text, "Five-minute recording limit reached; audio discarded")
+
     def test_successful_eos_flow_and_finalize_cancel_are_generation_safe(self):
         with tempfile.TemporaryDirectory() as tmp:
             effects, view, client, glib, _ = make_effects(Path(tmp) / "audio")
@@ -246,6 +267,20 @@ class DesktopRecordingTests(unittest.TestCase):
             self.assertEqual(glib.idle.pop()(), 0)
             self.assertEqual(view.controller.state, State.IDLE)
             self.assertEqual(client.calls, [])
+            self.assertEqual(events, ["clipboard-close", "x11-close"])
+
+    def test_shutdown_during_request_ignores_late_transcription_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            effects, view, client, _glib, events = make_effects(Path(tmp) / "audio")
+            self.assertTrue(view.controller.start())
+            self.assertTrue(view.controller.stop())
+            worker = FakeThread.instances[-1]; worker.run(); _glib.idle.pop()()
+            self.assertEqual(view.controller.state, State.REQUESTING)
+            _path, callback, _cancellable = client.calls[0]
+            effects.shutdown(); effects.shutdown()
+            callback("must be ignored", None)
+            self.assertEqual(view.controller.state, State.IDLE)
+            self.assertIsNone(view.controller.text)
             self.assertEqual(events, ["clipboard-close", "x11-close"])
 
     def test_shutdown_cleans_capture_and_closes_clipboard_before_x11(self):

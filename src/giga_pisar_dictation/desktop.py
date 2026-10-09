@@ -1,6 +1,7 @@
 """Desktop command/effect wiring; platform effects are invoked only on user commands."""
 from __future__ import annotations
 import threading
+import os
 from dataclasses import replace
 import gi
 gi.require_version("GLib", "2.0"); gi.require_version("Gio", "2.0")
@@ -17,11 +18,13 @@ class DesktopEffects:
     def __init__(self, view, *, config=None, key=None, client=None, audio_directory=None,
                  wav_factory=PrivateWav, recorder_factory=GstRecorder, clipboard=None,
                  x11_factory=X11Adapter, glib=GLib, thread_factory=threading.Thread,
-                 hotkey_factory=None, config_saver=None, key_saver=None):
+                 hotkey_factory=None, config_saver=None, key_saver=None, autostart_store=None):
         self.view = view
         self.glib, self.thread_factory = glib, thread_factory
         self.hotkey_factory = hotkey_factory
         self.config_saver, self.key_saver = config_saver, key_saver
+        from .autostart import AutostartFile
+        self.autostart = autostart_store or AutostartFile()
         self.shortcut_status = "Shortcut disabled"
         self.shortcut_healthy = False
         self.wav_factory, self.recorder_factory = wav_factory, recorder_factory
@@ -31,17 +34,29 @@ class DesktopEffects:
         PrivateWav.cleanup_stale(self.audio_directory)
         self.client = client if client is not None else (ApiClient(self.config.base_url, self.key, self.config.timeout_seconds) if self.key else None)
         self.clipboard = clipboard or GtkClipboardAdapter()
-        try: self.x11 = x11_factory()
-        except RuntimeError: self.x11 = None
+        if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
+            self.x11 = None
+        else:
+            try: self.x11 = x11_factory()
+            except RuntimeError: self.x11 = None
         self.target = None; self.wav = None; self.recorder = None; self.cancellable = None
+        self._shutdown = False
         self.recording_generation = 0
         self.hotkey = None
         self._register_hotkey()
         if hasattr(self.view, "shortcut_status"): self.view.shortcut_status.set_text(self.shortcut_status)
-        self.view.status.set_text("WARNING: HTTP does not encrypt the API key or audio; trusted LAN only; " + self.shortcut_status)
+        platform_notice = ("; X11 session unavailable; global shortcut and insertion are disabled"
+                           if self.x11 is None else "")
+        self.view.status.set_text("WARNING: HTTP does not encrypt the API key or audio; trusted LAN only; " +
+                                  self.shortcut_status + platform_notice)
 
     def _register_hotkey(self):
         if not self.config.hotkey_enabled: return
+        if self.x11 is None:
+            self.hotkey = None
+            self.shortcut_healthy = False
+            self.shortcut_status = "Global shortcut and insertion require an X11 session"
+            return
         try:
             from .hotkey import X11Hotkey
             factory = self.hotkey_factory or X11Hotkey
@@ -105,6 +120,7 @@ class DesktopEffects:
     def _recording_limit(self, generation):
         if generation == self.recording_generation and self.view.controller.state == State.RECORDING:
             self.view.controller.cancel()
+            self.view.refresh()
             self.view.status.set_text("Five-minute recording limit reached; audio discarded")
         return GLib.SOURCE_REMOVE
 
@@ -146,7 +162,7 @@ class DesktopEffects:
         self.view.refresh()
 
     def _response(self, text, error, generation):
-        if self.view.controller.state != State.REQUESTING or generation != self.view.controller._request_generation:
+        if getattr(self, "_shutdown", False) or self.view.controller.state != State.REQUESTING or generation != self.view.controller._request_generation:
             return
         delivery_status = None
         if error: self.view.controller.fail(str(error))
@@ -186,7 +202,8 @@ class DesktopEffects:
             "WARNING: unencrypted HTTP; server reachable" if not error else
             "WARNING: unencrypted HTTP; " + str(error)))
 
-    def save_settings(self, url, timeout, source, key, auto_insert, hotkey_enabled=True, hotkey_accelerator="Ctrl+Space"):
+    def save_settings(self, url, timeout, source, key, auto_insert, hotkey_enabled=True,
+                      hotkey_accelerator="Ctrl+Space", autostart_enabled=None):
         from .config import save_api_key, save_config
         saver = self.config_saver or save_config
         key_saver = self.key_saver or save_api_key
@@ -202,22 +219,38 @@ class DesktopEffects:
             if old_hotkey:
                 if new_config.hotkey_accelerator != old_config.hotkey_accelerator:
                     changed_registration = old_hotkey.prepare_rebind(new_config.hotkey_accelerator)
-            elif self.hotkey_factory:
+            elif self.x11 is not None and self.hotkey_factory:
                 new_registration = self.hotkey_factory(new_config.hotkey_accelerator, self._hotkey_toggle,
                     glib=self.glib, target_at_press=lambda: self.x11.active_window() if self.x11 else None,
                     on_error=None, on_status=None)
-            else:
+            elif self.x11 is not None:
                 from .hotkey import X11Hotkey
                 new_registration = X11Hotkey(new_config.hotkey_accelerator, self._hotkey_toggle,
                     glib=self.glib, target_at_press=lambda: self.x11.active_window() if self.x11 else None,
                     on_error=None, on_status=None)
+        previous_autostart = None
+        autostart_changed = False
         try:
+            if autostart_enabled is not None:
+                previous_autostart = self.autostart.is_enabled()
+                if bool(autostart_enabled) != previous_autostart:
+                    self.autostart.set_enabled(bool(autostart_enabled))
+                    autostart_changed = True
             if key: key_saver(key)
             saver(new_config)
-        except Exception:
+        except Exception as save_error:
+            rollback_errors = []
+            if autostart_changed:
+                try: self.autostart.set_enabled(previous_autostart)
+                except Exception as error: rollback_errors.append(error)
             if changed_registration and old_hotkey:
-                old_hotkey.rollback_rebind()
-            if new_registration: new_registration.close()
+                try: old_hotkey.rollback_rebind()
+                except Exception as error: rollback_errors.append(error)
+            if new_registration:
+                try: new_registration.close()
+                except Exception as error: rollback_errors.append(error)
+            if rollback_errors:
+                raise RuntimeError("Settings save failed and one or more rollback actions failed") from save_error
             raise
         if changed_registration and old_hotkey: old_hotkey.commit_rebind()
         if not new_config.hotkey_enabled and old_hotkey:
@@ -250,6 +283,8 @@ class DesktopEffects:
         self.view.status.set_text("Settings saved; WARNING: HTTP sends the Bearer key in cleartext on trusted LAN; " + self.shortcut_status)
 
     def shutdown(self):
+        if self._shutdown: return
+        self._shutdown = True
         if self.cancellable: self.cancellable.cancel()
         if self.view.controller.state not in (State.IDLE, State.RESULT, State.ERROR):
             self.view.controller.cancel()

@@ -7,9 +7,22 @@ COMMANDS = {"start", "stop", "cancel", "status", "toggle"}
 
 
 def parse_command(arguments):
+    """Parse an explicit command (legacy empty-list behavior is toggle)."""
     command = arguments[0] if arguments else "toggle"
-    if command not in COMMANDS: raise ValueError("Unknown command")
+    if len(arguments) > 1 or command not in COMMANDS:
+        raise ValueError("Unknown command")
     return command
+
+
+def parse_launch(arguments):
+    """Return (mode, command): desktop launches differ from explicit IPC commands."""
+    if arguments == ["--autostart"]:
+        return "autostart", None
+    if not arguments:
+        return "ordinary", None
+    if len(arguments) == 1 and arguments[0] in COMMANDS:
+        return None, arguments[0]
+    raise ValueError("Unknown command")
 
 
 class CommandApplication:
@@ -24,15 +37,21 @@ class CommandApplication:
 
     def _command_line(self, app, command_line):
         args = command_line.get_arguments()[1:]
-        if not command_line.get_is_remote():
-            if not args and self.on_launch:
-                self.on_launch()
-                return 0
-            command_line.print_literal("No running Giga Pisar Dictation instance; no recording started.\n")
-            return 1
         try:
-            command = parse_command(args)
-            result = self.on_command(command)
+            mode, command = parse_launch(args)
+            if not command_line.get_is_remote():
+                if mode is not None and self.on_launch:
+                    self.on_launch(mode)
+                    return 0
+                command_line.print_literal("No running Giga Pisar Dictation instance; no recording started.\n")
+                return 1
+            if command is None:
+                if mode == "ordinary":
+                    result = self.on_command("show")
+                else:
+                    result = {"ok": True, "status": "already running"}
+            else:
+                result = self.on_command(command)
             command_line.print_literal(json.dumps(result if result is not None else {"ok": True}) + "\n")
             return 0
         except ValueError:

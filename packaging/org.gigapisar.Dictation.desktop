@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Giga Pisar Dictation
+Comment=Russian speech dictation through a trusted-LAN service
+Exec=/usr/bin/giga-pisar-dictation
+TryExec=/usr/bin/giga-pisar-dictation
+Icon=giga-pisar-dictation
+Terminal=false
+Categories=AudioVideo;Audio;
+StartupWMClass=org.gigapisar.Dictation
