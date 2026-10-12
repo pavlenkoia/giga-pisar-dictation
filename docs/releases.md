@@ -4,6 +4,10 @@
 
 Если выпуск с таким тегом уже существует, публикация останавливается без перезаписи. Для исправленного пакета нужна новая версия и новый тег.
 
+## Выпуск v0.2.4
+
+Подготовлен выпуск с автоматической вставкой через XTest Ctrl+V и best-effort восстановлением прежнего текста или изображения clipboard (ADR 0005). Пользователь подтвердил быструю базовую работу. Публикация через tag workflow; результаты GitHub Actions проверяются после отправки тега. Локально: 133 теста, compileall, сборка, strict package validator, desktop-file-validate, extracted launcher help и lintian policy прошли. Полная desktop-приёмка не выполнялась.
+
 ## Подтверждённый выпуск
 
 Первый публичный [выпуск v0.2.3](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.3) опубликован по разрешению владельца. В [запуске GitHub Actions 37937954360](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/37937954360) успешно завершились сборка, 133 теста, проверки пакета и публикация.
@@ -38,11 +42,11 @@
 
 ## Скачать и установить
 
-Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.3:
+Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.4 после его публикации:
 
 ```sh
 sha256sum --check --strict SHA256SUMS
-sudo apt install ./giga-pisar-dictation_0.2.3_amd64.deb
+sudo apt install ./giga-pisar-dictation_0.2.4_amd64.deb
 ```
 
 Устанавливайте пакет только после успешной проверки. Репозитория APT и автоматических обновлений нет: новые версии нужно скачивать и устанавливать вручную.

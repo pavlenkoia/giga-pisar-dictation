@@ -3,7 +3,7 @@
     "agentOverrides": {
       "worker": {
         "model": "openai-codex/gpt-6-luna",
-        "thinking": "medium"
+        "thinking": "high"
       },
       "reviewer": {
         "model": "openai-codex/gpt-6.1-sol",
