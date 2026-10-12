@@ -16,10 +16,6 @@ _FILE_FLAGS = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEX
                getattr(os, "O_NONBLOCK", 0))
 
 
-class GroupWritableAutostartDirectoryError(PermissionError):
-    """The autostart directory grants write access to group or others."""
-
-
 def _directory_fd(path: Path, *, create=False):
     path = Path(os.path.abspath(path))
     fd = os.open("/", _DIR_FLAGS)
@@ -37,9 +33,6 @@ def _directory_fd(path: Path, *, create=False):
         metadata = os.fstat(fd)
         if metadata.st_uid != os.getuid() or not stat.S_ISDIR(metadata.st_mode):
             raise PermissionError("Небезопасный каталог автозапуска")
-        if stat.S_IMODE(metadata.st_mode) & 0o022:
-            raise GroupWritableAutostartDirectoryError(
-                "Каталог автозапуска доступен для записи группе или другим пользователям")
         return fd
     except Exception:
         os.close(fd)

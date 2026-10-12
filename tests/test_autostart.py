@@ -4,8 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from giga_pisar_dictation.autostart import (AutostartFile, DESKTOP_CONTENT, LEGACY_DESKTOP_CONTENT,
-                                             GroupWritableAutostartDirectoryError)
+from giga_pisar_dictation.autostart import AutostartFile, DESKTOP_CONTENT, LEGACY_DESKTOP_CONTENT
 from giga_pisar_dictation.config import Config
 from giga_pisar_dictation.desktop import DesktopEffects
 
@@ -63,7 +62,12 @@ class FakeSettingsDialog(FakeWidget):
         super().__init__(**kwargs); self.content = FakeWidget(); self.buttons = []; self.instances.append(self)
     def add_button(self, label, response): self.buttons.append((label, response))
     def get_content_area(self): return self.content
-    def run(self): return self.response
+    def run(self):
+        callback = type(self).on_run
+        type(self).on_run = None
+        if callback: callback()
+        return self.response
+    on_run = None
 
 
 class SettingsDialogFallbackTests(unittest.TestCase):
@@ -88,7 +92,6 @@ class SettingsDialogFallbackTests(unittest.TestCase):
             ResponseType = type("Response", (), {"CANCEL": 0, "OK": 1})
         GtkFake.Grid = FakeWidget
         errors = (
-            (GroupWritableAutostartDirectoryError("details"), "каталог доступен для записи группе/другим"),
             (PermissionError("foreign file or ownership"), "не удалось безопасно проверить состояние"),
             (OSError("access denied"), "не удалось безопасно проверить состояние"),
         )
@@ -106,10 +109,76 @@ class SettingsDialogFallbackTests(unittest.TestCase):
             diagnostic = next(widget for widget in FakeWidget.instances
                               if widget.text.startswith("Автозапуск недоступен:"))
             self.assertIn(expected_diagnostic, diagnostic.text)
-            if not isinstance(error, GroupWritableAutostartDirectoryError):
-                self.assertIn("Остальные настройки можно сохранить.", diagnostic.text)
+            self.assertIn("Остальные настройки можно сохранить.", diagnostic.text)
             self.assertTrue(diagnostic.line_wrap)
             self.assertEqual(diagnostic.max_width_chars, 44)
+
+    def test_0775_autostart_settings_toggle_is_available_and_saves_selected_state(self):
+        from unittest.mock import patch
+        from giga_pisar_dictation import gui
+        class Config:
+            base_url = "http://example.invalid"; timeout_seconds = 120; audio_source = ""; auto_insert = True
+            hotkey_enabled = False; hotkey_accelerator = "Ctrl+Space"
+        class Effects:
+            config = Config(); key = ""; shortcut_status = "Unavailable"
+            def __init__(self, store): self.autostart = store; self.saved = []
+            def save_settings(self, *args, **kwargs):
+                self.autostart.set_enabled(kwargs["autostart_enabled"])
+                self.saved.append(kwargs["autostart_enabled"])
+        class GtkFake:
+            Dialog = FakeSettingsDialog; Grid = FakeWidget; Label = FakeWidget; Entry = FakeWidget; ComboBoxText = FakeWidget
+            SpinButton = type("Spin", (), {"new_with_range": staticmethod(lambda *_: FakeWidget())})
+            CheckButton = FakeWidget; ResponseType = type("Response", (), {"CANCEL": 0, "OK": 1})
+        with tempfile.TemporaryDirectory() as temp:
+            config_home = Path(temp) / "config"; config_home.mkdir()
+            directory = config_home / "autostart"; directory.mkdir(mode=0o700); directory.chmod(0o775)
+            store = AutostartFile(config_home)
+            effects = Effects(store)
+            FakeSettingsDialog.instances.clear(); FakeWidget.instances.clear()
+            FakeSettingsDialog.response = 1
+            FakeSettingsDialog.on_run = lambda: next(widget for widget in FakeWidget.instances
+                if widget.text == "Запускать при входе в систему").set_active(True)
+            view = gui.DesktopWindow.__new__(gui.DesktopWindow)
+            view.effects = effects; view.window = object(); view.status = FakeWidget()
+            with patch.object(gui, "Gtk", GtkFake), patch.object(gui, "list_audio_sources", return_value=[]):
+                view.settings_dialog()
+            toggle = next(widget for widget in FakeWidget.instances
+                          if widget.text == "Запускать при входе в систему")
+            self.assertTrue(toggle.sensitive)
+            self.assertEqual(effects.saved, [True])
+            self.assertTrue(store.is_enabled())
+            self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o775)
+
+    def test_write_failure_does_not_report_settings_saved(self):
+        from unittest.mock import patch
+        from giga_pisar_dictation import gui
+        class Config:
+            base_url = "http://example.invalid"; timeout_seconds = 120; audio_source = ""; auto_insert = True
+            hotkey_enabled = False; hotkey_accelerator = "Ctrl+Space"
+        class Effects:
+            config = Config(); key = ""; shortcut_status = "Unavailable"
+            def __init__(self, store): self.autostart = store
+            def save_settings(self, *args, **kwargs): self.autostart.set_enabled(kwargs["autostart_enabled"])
+        class GtkFake:
+            Dialog = FakeSettingsDialog; Grid = FakeWidget; Label = FakeWidget; Entry = FakeWidget; ComboBoxText = FakeWidget
+            SpinButton = type("Spin", (), {"new_with_range": staticmethod(lambda *_: FakeWidget())})
+            CheckButton = FakeWidget; ResponseType = type("Response", (), {"CANCEL": 0, "OK": 1})
+        with tempfile.TemporaryDirectory() as temp:
+            config_home = Path(temp) / "config"; config_home.mkdir()
+            directory = config_home / "autostart"; directory.mkdir(mode=0o700); directory.chmod(0o775)
+            store = AutostartFile(config_home)
+            FakeSettingsDialog.instances.clear(); FakeWidget.instances.clear()
+            FakeSettingsDialog.response = 1
+            FakeSettingsDialog.on_run = lambda: next(widget for widget in FakeWidget.instances
+                if widget.text == "Запускать при входе в систему").set_active(True)
+            view = gui.DesktopWindow.__new__(gui.DesktopWindow)
+            view.effects = Effects(store); view.window = object(); view.status = FakeWidget()
+            with (patch.object(gui, "Gtk", GtkFake),
+                  patch.object(gui, "list_audio_sources", return_value=[]),
+                  patch("giga_pisar_dictation.autostart.os.replace", side_effect=OSError("disk write failed"))):
+                view.settings_dialog()
+            self.assertIn("Настройки отклонены", view.status.text)
+            self.assertFalse(store.is_enabled())
 
     def test_cancel_does_not_save_settings_when_autostart_unavailable(self):
         from unittest.mock import patch
@@ -133,15 +202,32 @@ class SettingsDialogFallbackTests(unittest.TestCase):
 
 
 class AutostartFileTests(unittest.TestCase):
-    def test_group_writable_autostart_directory_has_specific_typed_refusal(self):
+    def test_0775_autostart_directory_enable_disable_idempotence_and_mode_preservation(self):
         with tempfile.TemporaryDirectory() as temp:
             config_home = Path(temp) / "config"
             config_home.mkdir()
             directory = config_home / "autostart"
             directory.mkdir(mode=0o700)
             directory.chmod(0o775)
-            with self.assertRaises(GroupWritableAutostartDirectoryError):
-                AutostartFile(config_home).is_enabled()
+            store = AutostartFile(config_home)
+            entry = directory / "org.gigapisar.Dictation.desktop"
+            unrelated = directory / "another-app.desktop"
+            unrelated.write_bytes(b"leave untouched")
+            original_mode = stat.S_IMODE(directory.stat().st_mode)
+
+            self.assertFalse(store.is_enabled())
+            store.set_enabled(True)
+            self.assertTrue(store.is_enabled())
+            self.assertEqual(entry.read_bytes(), DESKTOP_CONTENT)
+            store.set_enabled(True)
+            self.assertEqual(entry.read_bytes(), DESKTOP_CONTENT)
+            store.set_enabled(False)
+            self.assertFalse(store.is_enabled())
+            self.assertFalse(entry.exists())
+            store.set_enabled(False)
+            self.assertEqual(stat.S_IMODE(directory.stat().st_mode), original_mode)
+            self.assertEqual(original_mode, 0o775)
+            self.assertEqual(unrelated.read_bytes(), b"leave untouched")
 
     def test_default_disabled_does_not_create_entry_directory(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -193,14 +193,10 @@ class DesktopWindow:
         autostart_available = True
         autostart_diagnostic = None
         try: autostart_enabled = self.effects.autostart.is_enabled()
-        except PermissionError as error:
+        except PermissionError:
             autostart_available = False
             autostart_enabled = False
-            from .autostart import GroupWritableAutostartDirectoryError
-            if isinstance(error, GroupWritableAutostartDirectoryError):
-                autostart_diagnostic = "Автозапуск недоступен:\nкаталог доступен для записи группе/другим.\nПрава может исправить владелец."
-            else:
-                autostart_diagnostic = "Автозапуск недоступен:\nне удалось безопасно проверить состояние.\nОстальные настройки можно сохранить."
+            autostart_diagnostic = "Автозапуск недоступен:\nне удалось безопасно проверить состояние.\nОстальные настройки можно сохранить."
         except (OSError, ValueError):
             autostart_available = False
             autostart_enabled = False
