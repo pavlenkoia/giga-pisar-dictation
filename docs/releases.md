@@ -4,6 +4,10 @@
 
 Если выпуск с таким тегом уже существует, публикация останавливается без перезаписи. Для исправленного пакета нужна новая версия и новый тег.
 
+## Выпуск v0.2.5
+
+[Выпуск v0.2.5](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.5) опубликован с commit `650f328`: убрана ошибочная блокировка автозапуска из-за group/other-write у принадлежащего пользователю каталога, включая 0775; права каталога не меняются. [GitHub Actions 38293233382](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/38293233382): build-and-test и publish — success. `.deb` и `SHA256SUMS` скачаны и независимо проверены по SHA256 и strict release validator. Локально прошли 135 тестов, compileall, проверки пакета и lintian policy; независимый review — OK. Реальная GTK/X11-приёмка и login autostart не выполнялись, пакет агентом не устанавливался.
+
 ## Выпуск v0.2.4
 
 [Выпуск v0.2.4](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.4) опубликован с commit `39f082c`: автоматическая вставка через XTest Ctrl+V и best-effort восстановление прежнего текста или изображения clipboard (ADR 0005). Пользователь подтвердил быструю базовую работу. [GitHub Actions 38235798087](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/38235798087): build-and-test и publish — success. `.deb` и `SHA256SUMS` скачаны и независимо проверены по SHA256 и strict release validator. Локально: 133 теста, compileall, сборка, strict package validator, desktop-file-validate, extracted launcher help и lintian policy прошли. Полная desktop-приёмка не выполнялась; пакет агентом не устанавливался.
@@ -42,11 +46,11 @@
 
 ## Скачать и установить
 
-Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.4:
+Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.5:
 
 ```sh
 sha256sum --check --strict SHA256SUMS
-sudo apt install ./giga-pisar-dictation_0.2.4_amd64.deb
+sudo apt install ./giga-pisar-dictation_0.2.5_amd64.deb
 ```
 
 Устанавливайте пакет только после успешной проверки. Репозитория APT и автоматических обновлений нет: новые версии нужно скачивать и устанавливать вручную.
