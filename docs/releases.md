@@ -6,7 +6,7 @@
 
 ## Выпуск v0.2.4
 
-Подготовлен выпуск с автоматической вставкой через XTest Ctrl+V и best-effort восстановлением прежнего текста или изображения clipboard (ADR 0005). Пользователь подтвердил быструю базовую работу. Публикация через tag workflow; результаты GitHub Actions проверяются после отправки тега. Локально: 133 теста, compileall, сборка, strict package validator, desktop-file-validate, extracted launcher help и lintian policy прошли. Полная desktop-приёмка не выполнялась.
+[Выпуск v0.2.4](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.4) опубликован с commit `39f082c`: автоматическая вставка через XTest Ctrl+V и best-effort восстановление прежнего текста или изображения clipboard (ADR 0005). Пользователь подтвердил быструю базовую работу. [GitHub Actions 38235798087](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/38235798087): build-and-test и publish — success. `.deb` и `SHA256SUMS` скачаны и независимо проверены по SHA256 и strict release validator. Локально: 133 теста, compileall, сборка, strict package validator, desktop-file-validate, extracted launcher help и lintian policy прошли. Полная desktop-приёмка не выполнялась; пакет агентом не устанавливался.
 
 ## Подтверждённый выпуск
 
@@ -42,7 +42,7 @@
 
 ## Скачать и установить
 
-Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.4 после его публикации:
+Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.4:
 
 ```sh
 sha256sum --check --strict SHA256SUMS
