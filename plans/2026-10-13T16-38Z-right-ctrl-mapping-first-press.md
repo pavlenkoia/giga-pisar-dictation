@@ -55,10 +55,10 @@ ADR 0006 сейчас предписывает инвалидировать owne
 - [x] Обновить release-метаданные версии и changelog через worker: версия `0.2.9`; changelog описывает исправление пропуска нажатия правого Ctrl из-за нерелевантных MappingNotify, без заявления о живой приёмке.
 - [x] Parent проверил suite — 169 tests passed (12.719 с), compileall, CLI help, desktop-file, сборку .deb 0.2.9, strict validator, lintian policy (только два разрешённых warning), extracted launcher и checksum — passed. Пакет `/tmp/giga-release-0.2.9-lcUM7S/`, лог `/tmp/giga-0.2.9-tests.log`; git diff --check passed.
 - [x] Свежий read-only reviewer проверил release diff — замечаний нет, verdict OK (run 4b22d73f-050d-4d34-a40b-197bb04c4863).
-- [ ] Commit на ветке задачи, merge main без обхода ограничений, push ветки/main.
-- [ ] Создать и отправить тег v0.2.9; проверить build-and-test и publish GitHub Actions.
-- [ ] Скачать .deb и SHA256SUMS; независимо проверить checksum и release validator.
-- [ ] Зафиксировать фактический выпуск в docs/, commit/push документации и итоговый отчёт.
+- [x] Commit `894b901` на ветке задачи, fast-forward merge main без обхода ограничений, push ветки/main выполнены.
+- [x] Аннотированный тег v0.2.9 создан и отправлен; GitHub Actions 38435175707 на `894b901`: build-and-test и publish — success.
+- [x] Скачаны .deb и SHA256SUMS; checksum и strict release validator — passed. SHA256 опубликованного .deb: `2404cf38d4fad69799b659a36486b545791384022884b75db5b972844b647c44`.
+- [x] Фактический выпуск зафиксирован в docs/README.md, releases.md, development.md на ветке chore/record-v0.2.9-release; итоговый отчёт подготовлен. Пакет не устанавливался. Commit/push этой записи выполняются заключительной Git-командой; их фактический результат отражается в итоговом сообщении.
 
 ## Одобрение
 Plannotator недоступен в инструментах этой сессии (поиск не вернул tool). Пользователь явно одобрил план в чате («одобряю»); разрешена реализация в согласованных границах. Изменение — один связанный seam обработки MappingNotify в hotkey.py с его регрессиями и документацией; один worker в текущем дереве, без параллельных писателей.
