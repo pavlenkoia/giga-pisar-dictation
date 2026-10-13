@@ -4,6 +4,10 @@
 
 Если выпуск с таким тегом уже существует, публикация останавливается без перезаписи. Для исправленного пакета нужна новая версия и новый тег.
 
+## Выпуск v0.2.8
+
+[Выпуск v0.2.8](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.8) опубликован с commit `28478b8`: режим «Рация» оставляет 300 мс захвата после отпускания правого Ctrl; повторное нажатие в этом интервале продолжает ту же запись, а смена mapping/закрытие binding отменяют хвост. [GitHub Actions 38431108643](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/38431108643): build-and-test и publish — success. `.deb` и `SHA256SUMS` скачаны; checksum и strict release validator прошли. SHA256 `.deb`: `937167948a2ddabb61a496124fc81b60d9d24291ee2180b481f4d6aa8f938777`. Локально прошли 161 тест, compileall, CLI help, desktop-file validation, сборка пакета, lintian policy, extracted launcher help и checksum; review — OK. Причина пропуска первого нажатия правого Ctrl не установлена. Реальная GTK/X11-приёмка не выполнялась, пакет агентом не устанавливался. CI сообщил предупреждение о Node.js 20 в закреплённых actions; запуск выполнялся на Node.js 24.
+
 ## Выпуск v0.2.7
 
 [Выпуск v0.2.7](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.7) опубликован с commit `365c44b`: к непустому тексту автоматической вставки дописывается один завершающий пробел; ручное Copy остаётся точным. [GitHub Actions 38425848725](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/38425848725): build-and-test и publish — success. `.deb` и `SHA256SUMS` скачаны; SHA256 и strict release validator прошли. Локально прошли 155 тестов, compileall, CLI help, desktop-file validation, сборка пакета, lintian policy, extracted launcher help и проверка checksum. Review — OK. Реальная GTK/X11-приёмка не выполнялась, пакет агентом не устанавливался. CI показал известное предупреждение о Node.js 20 в закреплённых actions, исполнение шло на Node.js 24.
@@ -54,11 +58,11 @@
 
 ## Скачать и установить
 
-Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.7:
+Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.8:
 
 ```sh
 sha256sum --check --strict SHA256SUMS
-sudo apt install ./giga-pisar-dictation_0.2.7_amd64.deb
+sudo apt install ./giga-pisar-dictation_0.2.8_amd64.deb
 ```
 
 Устанавливайте пакет только после успешной проверки. Репозитория APT и автоматических обновлений нет: новые версии нужно скачивать и устанавливать вручную.
