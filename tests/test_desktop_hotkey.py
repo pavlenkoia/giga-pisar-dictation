@@ -223,6 +223,24 @@ class DesktopSettingsTests(unittest.TestCase):
         self.assertTrue(candidate.closed); self.assertIsNone(e.hotkey)
         self.assertEqual(e.shortcut_status,"Global shortcut disabled")
         self.assertFalse(e.shortcut_healthy)
+    def test_first_right_ctrl_press_from_result_reaches_controller_start(self):
+        class StartEffects:
+            def start_recording(self): pass
+            def remove_audio(self): pass
+        effects=self.make()
+        controller=Controller(StartEffects()); controller.state=State.RESULT
+        effects.view.controller=controller; effects.recording_generation=3; effects._shutdown=False
+        hotkey=X11Hotkey("Ctrl+Space",lambda *_:None,glib=FakeGLib(),backend=FakeBackend(),
+            mode="push_to_talk",on_start=effects._push_to_talk_start,
+            on_stop=effects._push_to_talk_stop,on_invalidate=effects._invalidate_hold)
+        hotkey.backend.events=[hotkey.backend.event(2,105)]
+        hotkey._ready(9,1)
+        self.assertEqual(controller.state,State.RECORDING)
+        self.assertEqual(effects._push_to_talk_owner,3)
+        self.assertFalse(hotkey.gate.wait_release)
+        controller.state=State.RESULT
+        hotkey.close()
+
     def test_push_to_talk_owns_only_its_recording_generation_and_ignores_stale_release(self):
         effects=self.make(hotkey=Hotkey())
         class Controller:
@@ -234,12 +252,15 @@ class DesktopSettingsTests(unittest.TestCase):
             if name=="start":effects.view.controller.state=State.RECORDING
             return {"ok":True}
         effects.command=command
+        effects.glib=FakeGLib()
         self.assertEqual(effects._push_to_talk_start(73),10)
         self.assertEqual(effects.target,73); self.assertEqual(commands,["start"])
         effects._push_to_talk_stop(9)
         self.assertEqual(commands,["start"])
         effects.view.controller.state=State.RECORDING
         effects._push_to_talk_stop(10)
+        self.assertEqual(commands,["start"])
+        effects.glib.timers[next(reversed(effects.glib.timers))]()
         self.assertEqual(commands,["start","stop"])
         effects._push_to_talk_stop(10)
         self.assertEqual(commands,["start","stop"])

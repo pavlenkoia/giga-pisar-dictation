@@ -15,6 +15,7 @@ from .x11 import X11Adapter
 
 
 class DesktopEffects:
+    PTT_RELEASE_TAIL_MS = 300
     def __init__(self, view, *, config=None, key=None, client=None, audio_directory=None,
                  wav_factory=PrivateWav, recorder_factory=GstRecorder, clipboard=None,
                  x11_factory=X11Adapter, glib=GLib, thread_factory=threading.Thread,
@@ -99,6 +100,11 @@ class DesktopEffects:
 
     def _push_to_talk_start(self, target):
         if self._shutdown:return None
+        pending_owner=getattr(self,"_ptt_tail_owner",None)
+        if (pending_owner is not None and pending_owner==self.recording_generation and
+                self.view.controller.state==State.RECORDING):
+            self._cancel_ptt_tail()
+            return pending_owner
         previous_target=getattr(self,"target",None)
         previous_pending=getattr(self,"_hotkey_target_pending",False)
         self.target=target
@@ -115,8 +121,29 @@ class DesktopEffects:
     def _push_to_talk_stop(self, owner):
         if (owner is None or owner!=getattr(self,"_push_to_talk_owner",None) or
                 owner!=self.recording_generation or self.view.controller.state!=State.RECORDING):return
-        self._push_to_talk_owner=None
-        self.command("stop")
+        self._cancel_ptt_tail()
+        token=getattr(self,"_ptt_tail_token",0)+1
+        self._ptt_tail_token=token
+        self._ptt_tail_owner=owner
+        def finish_tail():
+            if token!=getattr(self,"_ptt_tail_token",None):return GLib.SOURCE_REMOVE
+            self._ptt_tail_source=None
+            if self._ptt_tail_owner==owner:self._ptt_tail_owner=None
+            if (owner!=self.recording_generation or owner!=getattr(self,"_push_to_talk_owner",None) or
+                    self.view.controller.state!=State.RECORDING):
+                return GLib.SOURCE_REMOVE
+            self._push_to_talk_owner=None
+            self.command("stop")
+            return GLib.SOURCE_REMOVE
+        self._ptt_tail_source=self.glib.timeout_add(self.PTT_RELEASE_TAIL_MS,finish_tail)
+
+    def _cancel_ptt_tail(self):
+        self._ptt_tail_token=getattr(self,"_ptt_tail_token",0)+1
+        source=getattr(self,"_ptt_tail_source",None)
+        self._ptt_tail_source=None
+        self._ptt_tail_owner=None
+        if source is not None:
+            self.glib.source_remove(source)
 
     def _hotkey_toggle(self, target=None):
         starting = self.view.controller.state in (State.IDLE, State.RESULT, State.ERROR)
@@ -155,12 +182,14 @@ class DesktopEffects:
 
     def _audio_error(self, generation):
         if generation == self.recording_generation and self.view.controller.state == State.RECORDING:
+            self._cancel_ptt_tail()
             self._push_to_talk_owner=None
             self.view.controller.fail("Ошибка аудиоустройства или файла")
             self.view.refresh()
 
     def _recording_limit(self, generation):
         if generation == self.recording_generation and self.view.controller.state == State.RECORDING:
+            self._cancel_ptt_tail()
             self._push_to_talk_owner=None
             self.view.controller.cancel()
             self.view.refresh()
@@ -191,6 +220,7 @@ class DesktopEffects:
         self.thread_factory(target=finalize, daemon=True).start()
 
     def cancel_recording(self):
+        self._cancel_ptt_tail()
         self._push_to_talk_owner=None
         if getattr(self, "limit_source", None):
             self.glib.source_remove(self.limit_source); self.limit_source = None

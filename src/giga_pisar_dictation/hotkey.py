@@ -95,7 +95,7 @@ class PushToTalkGate:
         if key_down:return False
         if not self.down and not self.wait_release:return False
         self.down=False; self.wait_release=False
-        owner=self.owner; self.owner=None
+        owner=self.owner
         if owner is not None:self.stop(owner)
         return True
     def reset(self):
