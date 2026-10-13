@@ -299,15 +299,37 @@ class X11Hotkey:
             except Exception:self.rollback_rebind();raise
         return changed
 
-    def _mapping_changed(self):
-        # MappingNotify invalidates any in-flight physical cycle, even if remapping fails.
-        self.gate.reset()
-        newcode=self.backend.keycode(self.keysym)
-        _require_keycode(newcode)
-        required=(self.backend.modifier_mask(self.modifier_names) if self.modifier_names and hasattr(self.backend,"modifier_mask") else self.required)
+    def _mapping_entries(self,mode,keysym,names,required):
+        code=self.backend.keycode(keysym)
+        _require_keycode(code)
+        mods=(self.backend.modifier_mask(names) if names and hasattr(self.backend,"modifier_mask") else required)
         masks=self.backend.lock_masks()
+        return code,mods,masks,self._binding_entries(code,mods,masks,mode)
+
+    def _current_mapping_entries(self):
+        return self._mapping_entries(self.mode,self.keysym,self.modifier_names,self.required)
+
+    def _prepared_mapping_entries(self):
+        mode,_accelerator,sym,_mods,_code,_masks,names,desired,_additions=self._prepared
+        required=(self.backend.modifier_mask(names) if names and hasattr(self.backend,"modifier_mask")
+                  else parse_accelerator(_accelerator)[1] if mode=="toggle" else 0)
+        return self._mapping_entries(mode,sym,names,required)
+
+    def _restore_current_binding(self):
+        self._grab_entries(self.entries)
+        if hasattr(self.backend,"sync"):self.backend.sync()
+        latest_code,latest_required,latest_masks,latest=self._current_mapping_entries()
+        if latest!=self.entries:return False
+        self.keycode,self.required,self.lock_masks=latest_code,latest_required,latest_masks
+        self._wait_for_held_ptt_key()
+        self.healthy=True; self._notify_status()
+        return True
+
+    def _mapping_changed(self):
+        # A changed active binding invalidates its physical ownership before re-grabbing.
+        self.gate.reset()
+        newcode,required,masks,desired=self._current_mapping_entries()
         old=(self.keycode,self.required,self.lock_masks)
-        desired=self._binding_entries(newcode,required,masks,self.mode)
         old_entries=self.entries
         if desired==old_entries:
             self._wait_for_held_ptt_key()
@@ -334,13 +356,36 @@ class X11Hotkey:
             event=self.backend.next_event()
             if event.type==34:
                 try:
-                    self.backend.refresh_mapping(event.xmapping)
-                    if getattr(self,"_prepared",None):
-                        self.gate.reset(); self._prepared_invalid=True
+                    request=event.xmapping.request
+                    # X MappingPointer has no bearing on key grabs. Refresh keyboard
+                    # cache only for MappingKeyboard; modifier state is queried live.
+                    if request==2: continue
+                    if request==1:self.backend.refresh_mapping(event.xmapping)
+                    if request not in (0,1):continue
+                    _code,_required,_masks,desired=self._current_mapping_entries()
+                    prepared=getattr(self,"_prepared",None)
+                    if prepared:
+                        try:
+                            _candidate_code,_candidate_required,_candidate_masks,candidate=self._prepared_mapping_entries()
+                            if candidate!=prepared[7]:
+                                self._prepared_invalid=True
+                                self.gate.reset()
+                        except Exception:
+                            self._prepared_invalid=True
+                            self.gate.reset()
+                            raise
+                    if desired!=self.entries:
+                        self.gate.reset()
+                        if prepared:
+                            self._prepared_invalid=True
+                            self.healthy=False; self._notify_status()
+                            continue
+                        self._mapping_changed()
+                    elif not self.healthy and not self._restore_current_binding():
                         self.healthy=False; self._notify_status()
-                        continue
-                    self._mapping_changed()
                 except Exception as error:
+                    self.gate.reset()
+                    if getattr(self,"_prepared",None):self._prepared_invalid=True
                     self.healthy=False; self._notify_status()
                     if self.on_error: self.on_error(str(error))
                 continue

@@ -57,7 +57,9 @@ class FakeBackend:
         return self.mods
     def refresh_mapping(self,event): pass
     def close(self): self.closed=True; self.grabs.clear()
-    def event(self,kind,code=65,state=4): return SimpleNamespace(type=kind,xkey=SimpleNamespace(keycode=code,state=state),xmapping=SimpleNamespace())
+    def event(self,kind,code=65,state=4,request=1,first_keycode=0,count=0):
+        return SimpleNamespace(type=kind,xkey=SimpleNamespace(keycode=code,state=state),
+            xmapping=SimpleNamespace(request=request,first_keycode=first_keycode,count=count))
 
 
 class AcceleratorTests(unittest.TestCase):
@@ -203,13 +205,131 @@ class PushToTalkHotkeyTests(unittest.TestCase):
         backend.down=True; backend.events=[backend.event(2,105)]; hotkey._ready(9,1)
         self.assertEqual(starts,[17]); hotkey.close()
 
+    def test_irrelevant_mapping_notify_before_press_does_not_consume_first_ptt_press(self):
+        starts=[]; stops=[]
+        hotkey,backend,_glib,_calls=self.make_hotkey(on_start=lambda target:starts.append(target) or len(starts),
+            on_stop=stops.append)
+        # MappingPointer does not describe keyboard state. The physical key is already down
+        # when the queued notification is drained, as in the first-press regression.
+        backend.down=True; backend.events=[backend.event(34,request=2),backend.event(2,105)]
+        hotkey._ready(9,1)
+        self.assertEqual(starts,[17]); self.assertTrue(hotkey.gate.down)
+        self.assertFalse(hotkey.gate.wait_release)
+        # Unrelated keyboard notification during the hold must not invalidate ownership.
+        backend.events=[backend.event(34,request=1,first_keycode=20,count=1)]
+        hotkey._ready(9,1)
+        self.assertTrue(hotkey.gate.down); self.assertEqual(stops,[])
+        backend.down=False; backend.events=[backend.event(3,105)]; hotkey._ready(9,1); hotkey._poll_release()
+        self.assertEqual(stops,[1])
+        # Repeated RESULT -> RECORDING cycles remain first-press responsive.
+        for generation in range(2,5):
+            backend.down=True; backend.events=[backend.event(34,request=2),backend.event(2,105)]
+            hotkey._ready(9,1)
+            self.assertEqual(starts,[17]*generation)
+            backend.down=False; backend.events=[backend.event(3,105)]; hotkey._ready(9,1); hotkey._poll_release()
+        self.assertEqual(stops,[1,2,3,4])
+        hotkey.close()
+
+    def test_real_mapping_change_during_ptt_release_tail_invalidates_owner(self):
+        starts=[]; stops=[]; invalidations=[]
+        hotkey,backend,_glib,_calls=self.make_hotkey(
+            on_start=lambda target:starts.append(target) or 7,
+            on_stop=stops.append,on_invalidate=lambda:invalidations.append(True))
+        backend.down=True; backend.events=[backend.event(2,105)]; hotkey._ready(9,1)
+        backend.down=False; backend.events=[backend.event(3,105)]; hotkey._ready(9,1); hotkey._poll_release()
+        self.assertFalse(hotkey.gate.wait_release); self.assertEqual(hotkey.gate.owner,7)
+        self.assertEqual(stops,[7])
+        backend.mapping[0xffe4]=106; backend.events=[backend.event(34,request=1)]
+        hotkey._ready(9,1)
+        self.assertEqual(hotkey.keycode,106); self.assertEqual(invalidations,[True])
+        self.assertFalse(hotkey.gate.wait_release); self.assertIsNone(hotkey.gate.owner)
+        hotkey.close()
+
+    def test_missing_keycode_invalidates_held_and_tail_ptt_ownership(self):
+        for tail in (False,True):
+            with self.subTest(tail=tail):
+                invalidations=[]; stops=[]
+                hotkey,backend,_glib,_calls=self.make_hotkey(
+                    on_start=lambda _target:11,on_stop=stops.append,
+                    on_invalidate=lambda:invalidations.append(True))
+                backend.down=True; backend.events=[backend.event(2,105)]; hotkey._ready(9,1)
+                if tail:
+                    backend.down=False; backend.events=[backend.event(3,105)]
+                    hotkey._ready(9,1); hotkey._poll_release()
+                    self.assertEqual(stops,[11]); self.assertEqual(hotkey.gate.owner,11)
+                backend.mapping[0xffe4]=0; backend.events=[backend.event(34,request=1)]
+                hotkey._ready(9,1)
+                self.assertFalse(hotkey.gate.down); self.assertFalse(hotkey.gate.wait_release)
+                self.assertIsNone(hotkey.gate.owner); self.assertEqual(invalidations,[True])
+                self.assertFalse(hotkey.healthy)
+                hotkey.close()
+
+    def test_missing_toggle_keycode_resets_unfinished_gate_before_failed_dispatch(self):
+        backend=FakeBackend(); calls=[]
+        hotkey=X11Hotkey("Ctrl+Space",calls.append,glib=FakeGLib(),backend=backend)
+        hotkey.gate.press(4,4)
+        backend.mapping[32]=0; backend.events=[backend.event(34,request=1)]
+        hotkey._ready(9,1)
+        self.assertFalse(hotkey.gate.down); self.assertFalse(hotkey.gate.wait_release)
+        hotkey.gate.release(); hotkey._poll_release()
+        self.assertEqual(calls,[]); self.assertFalse(hotkey.healthy)
+        hotkey.close()
+
+    def test_unhealthy_binding_recovers_after_missing_keycode_or_grab_conflict(self):
+        for failure in ("missing", "conflict"):
+            with self.subTest(failure=failure):
+                backend=FakeBackend(); hotkey=X11Hotkey("Ctrl+Space",lambda *_:None,
+                    glib=FakeGLib(),backend=backend)
+                if failure=="missing":backend.mapping[32]=0
+                else:
+                    backend.mapping[32]=66; backend.external.add((66,4))
+                backend.events=[backend.event(34,request=1)]; hotkey._ready(9,1)
+                self.assertFalse(hotkey.healthy)
+                backend.mapping[32]=65; backend.external.clear()
+                backend.events=[backend.event(34,request=1)]; hotkey._ready(9,1)
+                self.assertTrue(hotkey.healthy); self.assertTrue(hotkey.verify_binding())
+                self.assertTrue(backend.grabs.issuperset(hotkey.entries))
+                hotkey.close()
+
+    def test_prepared_candidate_mapping_change_away_and_back_stays_invalid(self):
+        hotkey,backend,_glib,_calls=self.make_hotkey()
+        self.assertTrue(hotkey.prepare_binding("toggle","Ctrl+a"))
+        backend.mapping[ord("a")]=45; backend.events=[backend.event(34,request=1)]
+        hotkey._ready(9,1)
+        self.assertTrue(hotkey._prepared_invalid)
+        backend.mapping[ord("a")]=38; backend.events=[backend.event(34,request=1)]
+        hotkey._ready(9,1)
+        self.assertTrue(hotkey._prepared_invalid)
+        with self.assertRaises(Exception):hotkey.commit_rebind()
+        hotkey.rollback_rebind(); self.assertEqual(hotkey.mode,"push_to_talk")
+        hotkey.close()
+
+    def test_mapping_check_error_resets_gate_and_invalidates_prepared_candidate(self):
+        hotkey,backend,_glib,_calls=self.make_hotkey()
+        self.assertTrue(hotkey.prepare_binding("toggle","Ctrl+a"))
+        backend.mapping[ord("a")]=0; backend.events=[backend.event(34,request=1)]
+        hotkey._ready(9,1)
+        self.assertTrue(hotkey._prepared_invalid); self.assertFalse(hotkey.healthy)
+        self.assertFalse(hotkey.gate.down); self.assertFalse(hotkey.gate.wait_release)
+        with self.assertRaises(Exception):hotkey.commit_rebind()
+        hotkey.rollback_rebind(); hotkey.close()
+
+    def test_unchanged_mapping_notify_preserves_prepared_candidate(self):
+        hotkey,backend,_glib,_calls=self.make_hotkey()
+        self.assertTrue(hotkey.prepare_binding("toggle","Ctrl+a"))
+        backend.events=[backend.event(34,request=1)]
+        hotkey._ready(9,1)
+        self.assertFalse(hotkey._prepared_invalid); self.assertTrue(hotkey.healthy)
+        hotkey.commit_rebind()
+        self.assertEqual(hotkey.accelerator,"Ctrl+a"); hotkey.close()
+
     def test_mapping_during_prepare_invalidates_and_commit_rechecks_current_binding(self):
         hotkey,backend,_glib,_calls=self.make_hotkey()
         self.assertTrue(hotkey.prepare_binding("toggle","Ctrl+a"))
         backend.mapping[ord("a")]=45
         backend.events=[backend.event(34)]
         hotkey._ready(9,1)
-        self.assertFalse(hotkey.healthy)
+        self.assertTrue(hotkey.healthy)
         with self.assertRaises(Exception):hotkey.commit_rebind()
         hotkey.rollback_rebind()
         self.assertTrue(backend.grabs.issuperset(hotkey.entries))

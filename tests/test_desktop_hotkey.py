@@ -230,15 +230,28 @@ class DesktopSettingsTests(unittest.TestCase):
         effects=self.make()
         controller=Controller(StartEffects()); controller.state=State.RESULT
         effects.view.controller=controller; effects.recording_generation=3; effects._shutdown=False
+        effects.glib=FakeGLib()
         hotkey=X11Hotkey("Ctrl+Space",lambda *_:None,glib=FakeGLib(),backend=FakeBackend(),
             mode="push_to_talk",on_start=effects._push_to_talk_start,
             on_stop=effects._push_to_talk_stop,on_invalidate=effects._invalidate_hold)
-        hotkey.backend.events=[hotkey.backend.event(2,105)]
+        backend=hotkey.backend
+        backend.down=True
+        backend.events=[backend.event(34,request=2),backend.event(2,105)]
         hotkey._ready(9,1)
         self.assertEqual(controller.state,State.RECORDING)
         self.assertEqual(effects._push_to_talk_owner,3)
         self.assertFalse(hotkey.gate.wait_release)
-        controller.state=State.RESULT
+        for generation in range(3,6):
+            backend.down=False; backend.events=[backend.event(3,105)]
+            hotkey._ready(9,1); hotkey._poll_release()
+            controller.state=State.RESULT
+            if generation<5:
+                effects.recording_generation=generation+1
+                backend.down=True
+                backend.events=[backend.event(34,request=2),backend.event(2,105)]
+                hotkey._ready(9,1)
+                self.assertEqual(controller.state,State.RECORDING)
+                self.assertEqual(effects._push_to_talk_owner,generation+1)
         hotkey.close()
 
     def test_push_to_talk_owns_only_its_recording_generation_and_ignores_stale_release(self):
