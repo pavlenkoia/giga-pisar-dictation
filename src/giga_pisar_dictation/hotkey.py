@@ -78,27 +78,91 @@ class EventGate:
     def close(self): self.closed=True; self.reset()
 
 
+class PushToTalkGate:
+    """Own one hold cycle and end it only after the physical key is released."""
+    def __init__(self, target_at_press, start, stop, invalidate):
+        self.target_at_press=target_at_press; self.start=start; self.stop=stop; self.invalidate=invalidate
+        self.down=False; self.wait_release=False; self.owner=None; self.closed=False
+    def press(self):
+        if self.closed or self.down or self.wait_release: return
+        self.down=True
+        target=self.target_at_press()
+        self.owner=self.start(target)
+    def release(self):
+        if self.down: self.down=False; self.wait_release=True
+    def poll(self, key_down):
+        if self.closed:return False
+        if key_down:return False
+        if not self.down and not self.wait_release:return False
+        self.down=False; self.wait_release=False
+        owner=self.owner; self.owner=None
+        if owner is not None:self.stop(owner)
+        return True
+    def reset(self):
+        was_active=self.down or self.wait_release or self.owner is not None
+        self.down=False; self.wait_release=False; self.owner=None
+        if was_active:self.invalidate()
+    def close(self):
+        if self.closed:return
+        self.reset(); self.closed=True
+
+
 class X11Hotkey:
-    def __init__(self, accelerator, dispatch, glib=None, display=None, backend=None, target_at_press=None, on_error=None, on_status=None):
+    def __init__(self, accelerator, dispatch, glib=None, display=None, backend=None, target_at_press=None, on_error=None, on_status=None,
+                 mode="toggle", on_start=None, on_stop=None, on_invalidate=None):
         import gi
         gi.require_version("GLib","2.0")
         from gi.repository import GLib
         self.glib=glib or GLib; self.dispatch=dispatch; self.on_error=on_error; self.on_status=on_status
+        if mode not in ("toggle", "push_to_talk"): raise ValueError("Неверный режим глобальной клавиши")
+        self.mode=mode; self.on_start=on_start; self.on_stop=on_stop; self.on_invalidate=on_invalidate
         self.healthy=True; self.closed=False; self.source=None; self.poll_source=None
         self.backend=backend or NativeX11Backend(display)
         self.gate=None
         try:
             self.accelerator=accelerator
-            self.keysym,self.modifier_names=parse_accelerator_details(accelerator)
+            self.keysym,self.modifier_names=self._binding_spec(mode,accelerator)
             self.required=self._modifier_mask(self.modifier_names)
-            self.gate=EventGate(target_at_press or self.backend.active_window,dispatch)
+            self.target_at_press=target_at_press or self.backend.active_window
+            self.gate=self._make_gate(mode)
             self._bind()
             self._notify_status()
         except Exception:
             self.close(); raise
 
+    @staticmethod
+    def _binding_spec(mode, accelerator):
+        if mode=="push_to_talk": return 0xffe4, ()
+        if mode!="toggle": raise ValueError("Неверный режим глобальной клавиши")
+        return parse_accelerator_details(accelerator)
+
+    def _binding_entries(self,keycode,required,masks,mode=None):
+        _require_keycode(keycode)
+        return frozenset((keycode,mask) for mask in range(256)) if (mode or self.mode)=="push_to_talk" else self._toggle_entries(keycode,required,masks)
+
+    @staticmethod
+    def _toggle_entries(keycode,required,masks):
+        _require_keycode(keycode)
+        return frozenset((keycode,required|lock) for lock in masks)
+
+    def _make_gate(self,mode):
+        if mode=="push_to_talk":
+            return PushToTalkGate(self.target_at_press,self.on_start or (lambda _target:None),
+                self.on_stop or (lambda _owner:None),self.on_invalidate or (lambda:None))
+        return EventGate(self.target_at_press,self.dispatch)
+
+    def _wait_for_held_ptt_key(self):
+        if self.mode=="push_to_talk" and self.backend.key_is_down(self.keycode):
+            self.gate.wait_release=True
+
+    def activate(self, dispatch, *, on_start=None, on_stop=None, on_invalidate=None, on_error=None, on_status=None):
+        self.dispatch=dispatch; self.on_start=on_start; self.on_stop=on_stop; self.on_invalidate=on_invalidate
+        self.gate=self._make_gate(self.mode)
+        self._wait_for_held_ptt_key()
+        self.on_error=on_error; self.on_status=on_status
+
     def _modifier_mask(self,names):
-        return self.backend.modifier_mask(names) if hasattr(self.backend,"modifier_mask") else parse_accelerator(self.accelerator)[1]
+        return self.backend.modifier_mask(names) if names and hasattr(self.backend,"modifier_mask") else parse_accelerator(self.accelerator)[1] if self.mode=="toggle" else 0
 
     def _notify_status(self):
         if self.on_status: self.on_status(self.healthy,self.accelerator)
@@ -107,18 +171,14 @@ class X11Hotkey:
         self.keycode=self.backend.keycode(self.keysym)
         _require_keycode(self.keycode)
         self.lock_masks=self.backend.lock_masks()
-        self.entries=self._binding_entries(self.keycode,self.required,self.lock_masks)
+        self.entries=self._binding_entries(self.keycode,self.required,self.lock_masks,self.mode)
         self._grab_entries(self.entries)
         if hasattr(self.backend,"sync"): self.backend.sync()
+        self._wait_for_held_ptt_key()
         self._drain_events()
         self.backend.select_mapping()
         self.source=self.glib.io_add_watch(self.backend.fd(), self.glib.PRIORITY_DEFAULT, self.glib.IO_IN, self._ready)
         self.poll_source=self.glib.timeout_add(20,self._poll_release)
-
-    @staticmethod
-    def _binding_entries(keycode,required,masks):
-        _require_keycode(keycode)
-        return frozenset((keycode,required|lock) for lock in masks)
 
     def _grab_entries(self,entries):
         if entries: self.backend.grab_entries(entries)
@@ -127,14 +187,20 @@ class X11Hotkey:
         if entries: self.backend.ungrab_entries(entries)
 
     def prepare_rebind(self, accelerator):
-        sym,names=parse_accelerator_details(accelerator); mods=self.backend.modifier_mask(names) if hasattr(self.backend,"modifier_mask") else parse_accelerator(accelerator)[1]
+        return self.prepare_binding(self.mode,accelerator)
+
+    def prepare_binding(self, mode, accelerator):
+        sym,names=self._binding_spec(mode,accelerator)
+        mods=(self.backend.modifier_mask(names) if names and hasattr(self.backend,"modifier_mask")
+              else parse_accelerator(accelerator)[1] if mode=="toggle" else 0)
         code=self.backend.keycode(sym); _require_keycode(code); masks=self.backend.lock_masks()
-        if sym==self.keysym and mods==self.required: return False
+        if mode==self.mode and sym==self.keysym and mods==self.required:return False
         if getattr(self,"_prepared",None): raise RuntimeError("Переназначение сочетания уже выполняется")
-        desired=self._binding_entries(code,mods,masks)
+        desired=self._binding_entries(code,mods,masks,mode)
         additions=desired-self.entries
         self.gate.reset()
-        self._prepared=(accelerator,sym,mods,code,masks,names,desired,additions)
+        self._prepared=(mode,accelerator,sym,mods,code,masks,names,desired,additions)
+        self._prepared_invalid=False
         try:
             self._grab_entries(additions)
             if hasattr(self.backend,"sync"): self.backend.sync()
@@ -143,29 +209,88 @@ class X11Hotkey:
             self._ungrab_entries(additions)
             if hasattr(self.backend,"sync"): self.backend.sync()
             self._prepared=None
+            self._prepared_invalid=False
             raise
         return True
 
     def commit_rebind(self):
         if not getattr(self,"_prepared",None): return
-        accelerator,sym,mods,code,masks,names,desired,_additions=self._prepared
-        removals=self.entries-desired
-        self._ungrab_entries(removals)
+        mode,accelerator,sym,mods,code,masks,names,desired,_additions=self._prepared
+        # MappingNotify and server state may change between prepare and save.
         if hasattr(self.backend,"sync"): self.backend.sync()
         self._drain_events()
-        self.accelerator,self.keysym,self.modifier_names,self.required,self.keycode,self.lock_masks=accelerator,sym,names,mods,code,masks
-        self.entries=desired
+        current_code=self.backend.keycode(sym); _require_keycode(current_code)
+        current_mods=(self.backend.modifier_mask(names) if names and hasattr(self.backend,"modifier_mask")
+                      else parse_accelerator(accelerator)[1] if mode=="toggle" else 0)
+        current_masks=self.backend.lock_masks()
+        actual=self._binding_entries(current_code,current_mods,current_masks,mode)
+        if (actual!=desired or not self.healthy or self._prepared_invalid):
+            raise ShortcutError("Соответствие клавиш X11 изменилось; повторите сохранение")
+        additions=actual-self.entries
+        self._grab_entries(additions)
+        if hasattr(self.backend,"sync"):self.backend.sync()
+        self._drain_events()
+        latest_code=self.backend.keycode(sym); _require_keycode(latest_code)
+        latest_mods=(self.backend.modifier_mask(names) if names and hasattr(self.backend,"modifier_mask")
+                     else parse_accelerator(accelerator)[1] if mode=="toggle" else 0)
+        latest_masks=self.backend.lock_masks()
+        latest=self._binding_entries(latest_code,latest_mods,latest_masks,mode)
+        if self._prepared_invalid or not self.healthy or latest!=actual:
+            raise ShortcutError("Соответствие клавиш X11 изменилось; повторите сохранение")
+        actual=latest; current_code=latest_code; current_mods=latest_mods; current_masks=latest_masks
+        removals=self.entries-actual
+        try:
+            self._ungrab_entries(removals)
+            if hasattr(self.backend,"sync"):self.backend.sync()
+            self._drain_events()
+            final_code=self.backend.keycode(sym); _require_keycode(final_code)
+            final_mods=(self.backend.modifier_mask(names) if names and hasattr(self.backend,"modifier_mask")
+                        else parse_accelerator(accelerator)[1] if mode=="toggle" else 0)
+            final_masks=self.backend.lock_masks()
+            final_entries=self._binding_entries(final_code,final_mods,final_masks,mode)
+            if self._prepared_invalid or not self.healthy or final_entries!=actual:
+                raise ShortcutError("Соответствие клавиш X11 изменилось; повторите сохранение")
+        except Exception:
+            self._grab_entries(removals)
+            self._ungrab_entries(additions)
+            if hasattr(self.backend,"sync"):self.backend.sync()
+            raise
+        actual=final_entries; current_code=final_code; current_mods=final_mods; current_masks=final_masks
+        self.mode,self.accelerator,self.keysym,self.modifier_names,self.required,self.keycode,self.lock_masks=mode,accelerator,sym,names,current_mods,current_code,current_masks
+        self.entries=actual
         self._prepared=None
-        self.gate.reset()
+        self._prepared_invalid=False
+        self.gate=self._make_gate(mode)
+        self._wait_for_held_ptt_key()
         self.healthy=True; self._notify_status()
+
+    def verify_binding(self):
+        if getattr(self,"_prepared",None):raise RuntimeError("Переназначение сочетания ещё не подтверждено")
+        if hasattr(self.backend,"sync"):self.backend.sync()
+        self._drain_events()
+        code=self.backend.keycode(self.keysym); _require_keycode(code)
+        mods=(self.backend.modifier_mask(self.modifier_names)
+              if self.modifier_names and hasattr(self.backend,"modifier_mask") else self.required)
+        masks=self.backend.lock_masks()
+        actual=self._binding_entries(code,mods,masks,self.mode)
+        if not self.healthy or actual!=self.entries:
+            raise ShortcutError("Соответствие клавиш X11 изменилось; повторите сохранение")
+        return True
 
     def rollback_rebind(self):
         if getattr(self,"_prepared",None):
-            _accelerator,_sym,_mods,_code,_masks,_names,_desired,additions=self._prepared
+            _mode,_accelerator,_sym,_mods,_code,_masks,_names,_desired,additions=self._prepared
             self._ungrab_entries(additions)
             if hasattr(self.backend,"sync"): self.backend.sync()
             self._drain_events()
+            invalid=self._prepared_invalid
             self._prepared=None
+            self._prepared_invalid=False
+            if invalid:
+                try:self._mapping_changed()
+                except Exception as error:
+                    self.healthy=False; self._notify_status()
+                    if self.on_error:self.on_error(str(error))
 
     def rebind(self, accelerator):
         changed=self.prepare_rebind(accelerator)
@@ -179,16 +304,17 @@ class X11Hotkey:
         self.gate.reset()
         newcode=self.backend.keycode(self.keysym)
         _require_keycode(newcode)
-        required=self.backend.modifier_mask(self.modifier_names) if hasattr(self.backend,"modifier_mask") else self.required
+        required=(self.backend.modifier_mask(self.modifier_names) if self.modifier_names and hasattr(self.backend,"modifier_mask") else self.required)
         masks=self.backend.lock_masks()
         old=(self.keycode,self.required,self.lock_masks)
-        desired=self._binding_entries(newcode,required,masks)
+        desired=self._binding_entries(newcode,required,masks,self.mode)
         old_entries=self.entries
         if desired==old_entries:
+            self._wait_for_held_ptt_key()
             self.healthy=True; self._notify_status()
             return
         self.gate.reset()
-        if hasattr(self.backend,"update_grabs"):
+        if self.mode!="push_to_talk" and hasattr(self.backend,"update_grabs"):
             self.backend.update_grabs(old[0],old[1],old[2],newcode,required,masks)
         else:
             additions=desired-old_entries
@@ -198,6 +324,7 @@ class X11Hotkey:
                 self._ungrab_entries(additions); raise
         self.keycode,self.required,self.lock_masks=newcode,required,masks
         self.entries=desired
+        self._wait_for_held_ptt_key()
         self.healthy=True; self._notify_status()
 
     def _drain_events(self):
@@ -208,6 +335,10 @@ class X11Hotkey:
             if event.type==34:
                 try:
                     self.backend.refresh_mapping(event.xmapping)
+                    if getattr(self,"_prepared",None):
+                        self.gate.reset(); self._prepared_invalid=True
+                        self.healthy=False; self._notify_status()
+                        continue
                     self._mapping_changed()
                 except Exception as error:
                     self.healthy=False; self._notify_status()
@@ -216,8 +347,11 @@ class X11Hotkey:
             if event.type not in (2,3) or getattr(self,"_prepared",None): continue
             e=event.xkey
             if e.keycode!=self.keycode: continue
-            if event.type==2: self.gate.press(e.state,self.required)
-            else: self.gate.release()
+            if self.mode=="push_to_talk":
+                if event.type==2:self.gate.press()
+                else:self.gate.release()
+            elif event.type==2:self.gate.press(e.state,self.required)
+            else:self.gate.release()
         return processed
 
     def _ready(self, _fd, condition):
@@ -228,10 +362,11 @@ class X11Hotkey:
     def _poll_release(self):
         if self.closed:return False
         key_down=self.backend.key_is_down(self.keycode)
-        modifiers_down=self.backend.modifiers_down()
+        modifiers_down=False if self.mode=="push_to_talk" else self.backend.modifiers_down()
         # XQueryKeymap/XSync may pull events into Xlib without keeping the fd readable.
         if self._drain_events(): return True
-        self.gate.poll(key_down,modifiers_down)
+        if self.mode=="push_to_talk":self.gate.poll(key_down)
+        else:self.gate.poll(key_down,modifiers_down)
         return True
 
     def close(self):

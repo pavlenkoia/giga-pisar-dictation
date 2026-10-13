@@ -18,7 +18,7 @@ class FakeBackend:
     def __init__(self):
         self.events=[]; self.grabs=set(); self.external=set(); self.fail=None
         self.down=False; self.mods=False; self.closed=False; self.window=17; self.masks=(0,2,16,18)
-        self.mapping={32:65,ord("a"):38,ord("1"):65,ord("!"):65}; self.on_query=None
+        self.mapping={32:65,ord("a"):38,ord("1"):65,ord("!"):65,0xffe3:37,0xffe4:105}; self.on_query=None
         self.last_additions=set(); self.last_removals=set(); self.update_calls=[]; self.grab_calls=0
     def keycode(self,sym): return self.mapping.get(sym,0)
     def lock_masks(self): return self.masks
@@ -126,6 +126,157 @@ class NativeGrabTests(unittest.TestCase):
             native.grab_entries({(65,6),(65,20),(65,22)})
         self.assertEqual(x.grabs,{(65,4)})
         self.assertEqual(set(x.ungrabs),{(65,6),(65,20),(65,22)})
+
+
+class PushToTalkHotkeyTests(unittest.TestCase):
+    def make_hotkey(self, backend=None, **kwargs):
+        backend=backend or FakeBackend(); glib=FakeGLib(); calls=[]
+        hotkey=X11Hotkey("Ctrl+Space",lambda *_args:None,glib=glib,backend=backend,
+                         target_at_press=lambda:backend.window,mode="push_to_talk",**kwargs)
+        return hotkey,backend,glib,calls
+
+    def test_binding_is_right_control_only_with_all_256_modifier_masks(self):
+        hotkey,backend,_glib,_calls=self.make_hotkey()
+        self.assertEqual(hotkey.keysym,0xffe4); self.assertEqual(hotkey.keycode,105)
+        self.assertEqual(hotkey.entries,{(105,mask) for mask in range(256)})
+        self.assertFalse(any(code==37 for code,_mask in backend.grabs))
+        hotkey.close()
+
+    def test_physical_release_autorepeat_and_left_control_exclusion(self):
+        starts=[]; stops=[]
+        hotkey,backend,_glib,_calls=self.make_hotkey(on_start=lambda target:starts.append(target) or 4,
+            on_stop=stops.append)
+        backend.window=17
+        hotkey._ready(9,1) if not backend.events else None
+        backend.events=[backend.event(2,37),backend.event(3,37)]
+        hotkey._ready(9,1); self.assertEqual(starts,[])
+        backend.events=[backend.event(2,105)]; backend.down=True; backend.window=23
+        hotkey._ready(9,1); backend.window=99
+        self.assertEqual(starts,[23])
+        backend.events=[backend.event(3,105),backend.event(2,105)]; backend.down=True
+        hotkey._ready(9,1); hotkey._poll_release()
+        self.assertEqual(stops,[]); self.assertTrue(hotkey.gate.wait_release)
+        backend.events=[backend.event(3,105)]; backend.down=False; hotkey._ready(9,1)
+        hotkey._poll_release(); self.assertEqual(stops,[4])
+        hotkey.close()
+
+    def test_release_without_press_short_tap_busy_ownerless_and_start_failure(self):
+        starts=[]; stops=[]
+        hotkey,backend,_glib,_calls=self.make_hotkey(on_start=lambda target:starts.append(target) or None,
+            on_stop=stops.append)
+        backend.events=[backend.event(3,105)]; hotkey._ready(9,1); hotkey._poll_release()
+        self.assertEqual((starts,stops),([],[]))
+        backend.events=[backend.event(2,105),backend.event(3,105)]; backend.down=False
+        hotkey._ready(9,1); self.assertEqual(len(starts),1); hotkey._poll_release()
+        self.assertEqual(stops,[])
+        hotkey.close()
+        starts=[]
+        hotkey,backend,_glib,_calls=self.make_hotkey(on_start=lambda _target:starts.append(1) or None)
+        backend.events=[backend.event(2,105)]; hotkey._ready(9,1)
+        backend.events=[backend.event(3,105)]; backend.down=False; hotkey._ready(9,1); hotkey._poll_release()
+        self.assertEqual(starts,[1]); hotkey.close()
+
+    def test_activate_rechecks_physical_key_and_suppresses_buffered_repeat(self):
+        starts=[]
+        backend=FakeBackend(); hotkey=X11Hotkey("Ctrl+Space",lambda *_args:None,glib=FakeGLib(),backend=backend,
+            mode="push_to_talk",on_start=lambda target:starts.append(target) or 1)
+        backend.down=True
+        hotkey.activate(lambda *_args:None,on_start=lambda target:starts.append(target) or 2)
+        backend.events=[backend.event(2,105)]; hotkey._ready(9,1)
+        self.assertEqual(starts,[])
+        backend.down=False; hotkey._poll_release()
+        backend.down=True; backend.events=[backend.event(2,105)]; hotkey._ready(9,1)
+        self.assertEqual(starts,[17])
+        hotkey.close()
+
+    def test_held_key_on_enable_and_sync_or_query_buffered_events_wait_for_new_press(self):
+        starts=[]
+        backend=FakeBackend(); backend.down=True
+        backend.on_sync=lambda b:b.events.append(b.event(2,105))
+        hotkey=X11Hotkey("Ctrl+Space",lambda *_args:None,glib=FakeGLib(),backend=backend,
+            mode="push_to_talk",on_start=lambda target:starts.append(target) or 1)
+        self.assertEqual(starts,[])
+        hotkey._poll_release(); self.assertEqual(starts,[])
+        backend.down=False; hotkey._poll_release()
+        self.assertEqual(starts,[])
+        # A subsequent physical press is the only event that can own a cycle.
+        backend.down=True; backend.events=[backend.event(2,105)]; hotkey._ready(9,1)
+        self.assertEqual(starts,[17]); hotkey.close()
+
+    def test_mapping_during_prepare_invalidates_and_commit_rechecks_current_binding(self):
+        hotkey,backend,_glib,_calls=self.make_hotkey()
+        self.assertTrue(hotkey.prepare_binding("toggle","Ctrl+a"))
+        backend.mapping[ord("a")]=45
+        backend.events=[backend.event(34)]
+        hotkey._ready(9,1)
+        self.assertFalse(hotkey.healthy)
+        with self.assertRaises(Exception):hotkey.commit_rebind()
+        hotkey.rollback_rebind()
+        self.assertTrue(backend.grabs.issuperset(hotkey.entries))
+        hotkey.close()
+
+    def test_mapping_change_during_commit_restores_old_grabs_and_rejects_candidate(self):
+        hotkey,backend,_glib,_calls=self.make_hotkey()
+        old_entries=hotkey.entries.copy(); old_grabs=backend.grabs.copy()
+        self.assertTrue(hotkey.prepare_binding("toggle","Ctrl+a"))
+        original_ungrab=backend.ungrab_entries; injected=[False]
+        def ungrab(entries):
+            original_ungrab(entries)
+            if entries and not injected[0]:
+                injected[0]=True; backend.mapping[ord("a")]=45
+                backend.events.append(backend.event(34))
+        backend.ungrab_entries=ungrab
+        with self.assertRaises(Exception):hotkey.commit_rebind()
+        self.assertEqual(backend.grabs,old_grabs)
+        self.assertEqual(hotkey.entries,old_entries)
+        hotkey.rollback_rebind(); hotkey.close()
+
+    def test_mapping_remap_uses_all_256_ptt_masks_and_detects_any_conflict(self):
+        hotkey,backend,_glib,_calls=self.make_hotkey()
+        backend.mapping[0xffe4]=106; backend.events=[backend.event(34)]
+        hotkey._ready(9,1)
+        self.assertEqual(hotkey.entries,{(106,mask) for mask in range(256)})
+        self.assertEqual(backend.grabs,hotkey.entries)
+        self.assertEqual(backend.update_calls,[])
+        backend.external.add((107,193)); backend.mapping[0xffe4]=107
+        backend.events=[backend.event(34)]; hotkey._ready(9,1)
+        self.assertEqual(backend.grabs,hotkey.entries)
+        self.assertTrue(hotkey.healthy is False)
+        self.assertNotIn((105,0),backend.grabs)
+        hotkey.close()
+
+    def test_zero_keycode_and_validation_exception_after_removal_restore_old_grabs(self):
+        for failure in ("zero", "exception"):
+            with self.subTest(failure=failure):
+                hotkey,backend,_glib,_calls=self.make_hotkey()
+                old_entries=hotkey.entries.copy(); old_grabs=backend.grabs.copy()
+                self.assertTrue(hotkey.prepare_binding("toggle","Ctrl+a"))
+                original_ungrab=backend.ungrab_entries; injected=[False]
+                def ungrab(entries):
+                    original_ungrab(entries)
+                    if entries and not injected[0]:
+                        injected[0]=True
+                        if failure=="zero":backend.mapping[ord("a")]=0
+                        else:
+                            original_keycode=backend.keycode
+                            def invalid_validation(sym):
+                                if sym==ord("a"):raise RuntimeError("mapping validation failed")
+                                return original_keycode(sym)
+                            backend.keycode=invalid_validation
+                backend.ungrab_entries=ungrab
+                with self.assertRaises(Exception):hotkey.commit_rebind()
+                self.assertEqual(backend.grabs,old_grabs)
+                self.assertEqual(hotkey.entries,old_entries)
+                hotkey.rollback_rebind(); hotkey.close()
+
+    def test_grab_conflict_partial_prepare_rolls_back_and_close_releases_everything(self):
+        hotkey,backend,glib,_calls=self.make_hotkey()
+        old=backend.grabs.copy(); backend.fail=(38,20)
+        with self.assertRaises(RuntimeError):hotkey.prepare_binding("toggle","Ctrl+a")
+        self.assertEqual(backend.grabs,old)
+        source,poll=hotkey.source,hotkey.poll_source
+        hotkey.close()
+        self.assertFalse(backend.grabs); self.assertEqual(set(glib.removed),{source,poll})
 
 
 class X11HotkeyTests(unittest.TestCase):

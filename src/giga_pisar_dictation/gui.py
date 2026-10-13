@@ -207,6 +207,10 @@ class DesktopWindow:
         shortcut_state = Gtk.Label(label=self.effects.shortcut_status)
         url = Gtk.Entry(); url.set_text(self.effects.config.base_url)
         timeout = Gtk.SpinButton.new_with_range(1, 3600, 1); timeout.set_value(self.effects.config.timeout_seconds)
+        hotkey_mode = Gtk.ComboBoxText()
+        hotkey_mode.append("toggle", "Переключение")
+        hotkey_mode.append("push_to_talk", "Рация — правый Ctrl")
+        hotkey_mode.set_active_id(getattr(self.effects.config, "hotkey_mode", "toggle"))
         source = Gtk.ComboBoxText()
         source.append("", "Системный по умолчанию")
         source_error = None
@@ -230,6 +234,16 @@ class DesktopWindow:
         hotkey_enabled = Gtk.CheckButton(label="Включить глобальную клавишу X11")
         hotkey_enabled.set_active(self.effects.config.hotkey_enabled)
         hotkey = Gtk.Entry(); hotkey.set_text(self.effects.config.hotkey_accelerator)
+        def update_hotkey_sensitivity(*_args):
+            enabled=getattr(hotkey_enabled,"get_active",lambda:getattr(hotkey_enabled,"active",False))()
+            mode_id=getattr(hotkey_mode,"get_active_id",lambda:None)()
+            if hasattr(hotkey,"set_sensitive"):
+                hotkey.set_sensitive(enabled and mode_id != "push_to_talk")
+        if hasattr(hotkey_enabled, "connect"):
+            hotkey_enabled.connect("toggled", update_hotkey_sensitivity)
+        if hasattr(hotkey_mode, "connect"):
+            hotkey_mode.connect("changed", update_hotkey_sensitivity)
+        update_hotkey_sensitivity()
         settings_rows = [("Состояние клавиши", shortcut_state), ("Базовый URL API", url), ("Тайм-аут (секунды)", timeout), ("Микрофон", source)]
         if source_error:
             settings_rows.append(("", source_error))
@@ -239,13 +253,18 @@ class DesktopWindow:
             diagnostic.set_line_wrap(True)
             diagnostic.set_max_width_chars(44)
             settings_rows.append(("", diagnostic))
-        settings_rows.extend((("", hotkey_enabled), ("Клавиша (например, Ctrl+Space)", hotkey)))
+        settings_rows.extend((("", hotkey_enabled), ("Режим глобальной клавиши", hotkey_mode),
+                              ("Клавиша (например, Ctrl+Space)", hotkey)))
         for row, (label, widget) in enumerate(settings_rows):
             grid.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1); grid.attach(widget, 1, row, 1, 1)
         dialog.get_content_area().add(grid); dialog.show_all()
         if dialog.run() == Gtk.ResponseType.OK:
-            try: self.effects.save_settings(url.get_text(), timeout.get_value_as_int(), source.get_active_id() or "", key.get_text(), auto.get_active(), hotkey_enabled.get_active(), hotkey.get_text(), autostart_enabled=autostart.get_active() if autostart_available else None)
-            except (ValueError, PermissionError, OSError, RuntimeError): self.status.set_text("Настройки отклонены: сочетание недоступно или неверны права доступа к настройкам")
+            try: self.effects.save_settings(url.get_text(), timeout.get_value_as_int(), source.get_active_id() or "", key.get_text(), auto.get_active(), hotkey_enabled.get_active(), hotkey.get_text(), autostart_enabled=autostart.get_active() if autostart_available else None, hotkey_mode=hotkey_mode.get_active_id())
+            except RuntimeError as error:
+                if str(error)=="Нельзя менять глобальную клавишу во время записи или распознавания":
+                    self.status.set_text(str(error))
+                else:self.status.set_text("Настройки отклонены: сочетание недоступно или не удалось подтвердить сохранение")
+            except (ValueError, PermissionError, OSError): self.status.set_text("Настройки отклонены: сочетание недоступно или неверны права доступа к настройкам")
         dialog.destroy()
 
 

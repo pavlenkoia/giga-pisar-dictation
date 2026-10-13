@@ -21,6 +21,7 @@ class Config:
     auto_insert: bool = True
     hotkey_enabled: bool = True
     hotkey_accelerator: str = "Ctrl+Space"
+    hotkey_mode: str = "toggle"
 
     def validate(self):
         parts = urlsplit(self.base_url)
@@ -29,6 +30,7 @@ class Config:
         if not 1 <= self.timeout_seconds <= 3600: raise ValueError("Тайм-аут должен быть от 1 до 3600 секунд")
         if not isinstance(self.hotkey_enabled, bool): raise ValueError("Неверное значение настройки клавиши")
         if not isinstance(self.hotkey_accelerator, str): raise ValueError("Неверное сочетание клавиш")
+        if self.hotkey_mode not in ("toggle", "push_to_talk"): raise ValueError("Неверный режим глобальной клавиши")
         from .hotkey import parse_accelerator
         parse_accelerator(self.hotkey_accelerator)
 

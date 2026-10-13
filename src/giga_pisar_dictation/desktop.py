@@ -62,25 +62,61 @@ class DesktopEffects:
             factory = self.hotkey_factory or X11Hotkey
             self.hotkey = factory(self.config.hotkey_accelerator, self._hotkey_toggle,
                                   glib=self.glib, target_at_press=lambda: self.x11.active_window() if self.x11 else None,
-                                  on_error=self._hotkey_error, on_status=self._hotkey_status_changed)
+                                  on_error=self._hotkey_error, on_status=self._hotkey_status_changed,
+                                  mode=self.config.hotkey_mode, on_start=self._push_to_talk_start,
+                                  on_stop=self._push_to_talk_stop, on_invalidate=self._invalidate_hold)
             self.shortcut_healthy = getattr(self.hotkey, "healthy", True)
-            self.shortcut_status = ("Глобальная клавиша включена: " + self.config.hotkey_accelerator
+            self.shortcut_status = (self._active_hotkey_status()
                                     if self.shortcut_healthy else "Глобальная клавиша недоступна после изменения раскладки X11")
         except Exception:
             self.hotkey = None
             self.shortcut_healthy = False
             self.shortcut_status = "Глобальная клавиша недоступна; выберите другое сочетание в настройках"
 
+    def _active_hotkey_status(self):
+        if self.config.hotkey_mode == "push_to_talk":return "Рация — правый Ctrl включена"
+        return "Глобальная клавиша включена: " + self.config.hotkey_accelerator
+
     def _hotkey_status_changed(self, healthy, accelerator=None):
         self.shortcut_healthy = bool(healthy)
         if self.shortcut_healthy:
-            self.shortcut_status = "Глобальная клавиша включена: " + (accelerator or self.config.hotkey_accelerator)
+            self.shortcut_status = self._active_hotkey_status()
         else:
             self.shortcut_status = "Глобальная клавиша недоступна после изменения раскладки X11"
         if hasattr(self.view, "shortcut_status"): self.view.shortcut_status.set_text(self.shortcut_status)
 
     def _hotkey_error(self, _message):
+        self._invalidate_hold()
         self._hotkey_status_changed(False)
+
+    def _invalidate_hold(self):
+        owner=getattr(self,"_push_to_talk_owner",None)
+        self._push_to_talk_owner=None
+        controller=getattr(self.view,"controller",None)
+        if (owner is not None and owner==getattr(self,"recording_generation",None) and
+                controller is not None and controller.state==State.RECORDING and not self._shutdown):
+            self.command("cancel")
+
+    def _push_to_talk_start(self, target):
+        if self._shutdown:return None
+        previous_target=getattr(self,"target",None)
+        previous_pending=getattr(self,"_hotkey_target_pending",False)
+        self.target=target
+        self._hotkey_target_pending=True
+        result=self.command("start")
+        if not result.get("ok") or self.view.controller.state!=State.RECORDING:
+            self.target=previous_target
+            self._hotkey_target_pending=previous_pending
+            return None
+        owner=self.recording_generation
+        self._push_to_talk_owner=owner
+        return owner
+
+    def _push_to_talk_stop(self, owner):
+        if (owner is None or owner!=getattr(self,"_push_to_talk_owner",None) or
+                owner!=self.recording_generation or self.view.controller.state!=State.RECORDING):return
+        self._push_to_talk_owner=None
+        self.command("stop")
 
     def _hotkey_toggle(self, target=None):
         starting = self.view.controller.state in (State.IDLE, State.RESULT, State.ERROR)
@@ -119,11 +155,13 @@ class DesktopEffects:
 
     def _audio_error(self, generation):
         if generation == self.recording_generation and self.view.controller.state == State.RECORDING:
+            self._push_to_talk_owner=None
             self.view.controller.fail("Ошибка аудиоустройства или файла")
             self.view.refresh()
 
     def _recording_limit(self, generation):
         if generation == self.recording_generation and self.view.controller.state == State.RECORDING:
+            self._push_to_talk_owner=None
             self.view.controller.cancel()
             self.view.refresh()
             self.view.status.set_text("Достигнут лимит записи в пять минут; аудио удалено")
@@ -143,7 +181,9 @@ class DesktopEffects:
             def complete():
                 if generation != self.recording_generation or self.view.controller.state != State.FINALIZING:
                     return GLib.SOURCE_REMOVE
-                if error: self.view.controller.fail("Не удалось завершить запись аудио")
+                if error:
+                    self._push_to_talk_owner=None
+                    self.view.controller.fail("Не удалось завершить запись аудио")
                 else: self.view.controller.audio_finalized(valid)
                 self.view.refresh()
                 return GLib.SOURCE_REMOVE
@@ -151,6 +191,7 @@ class DesktopEffects:
         self.thread_factory(target=finalize, daemon=True).start()
 
     def cancel_recording(self):
+        self._push_to_talk_owner=None
         if getattr(self, "limit_source", None):
             self.glib.source_remove(self.limit_source); self.limit_source = None
         if self.recorder:
@@ -218,6 +259,7 @@ class DesktopEffects:
 
     def remove_audio(self):
         self.recording_generation = getattr(self, "recording_generation", 0) + 1
+        self._invalidate_hold()
         if self.recorder:
             try: self.recorder.cancel()
             except Exception: pass
@@ -239,31 +281,40 @@ class DesktopEffects:
             "ПРЕДУПРЕЖДЕНИЕ: HTTP не зашифрован; " + str(error)))
 
     def save_settings(self, url, timeout, source, key, auto_insert, hotkey_enabled=True,
-                      hotkey_accelerator="Ctrl+Space", autostart_enabled=None):
+                      hotkey_accelerator="Ctrl+Space", autostart_enabled=None, hotkey_mode=None):
         from .config import save_api_key, save_config
         saver = self.config_saver or save_config
         key_saver = self.key_saver or save_api_key
+        mode= self.config.hotkey_mode if hotkey_mode is None else hotkey_mode
         new_config = replace(self.config, base_url=url.strip(), timeout_seconds=timeout,
                              audio_source=source.strip(), auto_insert=bool(auto_insert),
-                             hotkey_enabled=bool(hotkey_enabled), hotkey_accelerator=hotkey_accelerator.strip())
+                             hotkey_enabled=bool(hotkey_enabled), hotkey_accelerator=hotkey_accelerator.strip(),
+                             hotkey_mode=mode)
         new_config.validate()
         old_config = self.config
+        registration_changed=(new_config.hotkey_enabled != old_config.hotkey_enabled or
+            new_config.hotkey_accelerator != old_config.hotkey_accelerator or
+            new_config.hotkey_mode != old_config.hotkey_mode)
+        if registration_changed and getattr(getattr(self.view,"controller",None),"state",State.IDLE) not in (State.IDLE,State.RESULT,State.ERROR):
+            raise RuntimeError("Нельзя менять глобальную клавишу во время записи или распознавания")
         old_hotkey = self.hotkey
         changed_registration = False
         new_registration = None
         if new_config.hotkey_enabled:
             if old_hotkey:
-                if new_config.hotkey_accelerator != old_config.hotkey_accelerator:
-                    changed_registration = old_hotkey.prepare_rebind(new_config.hotkey_accelerator)
-            elif self.x11 is not None and self.hotkey_factory:
-                new_registration = self.hotkey_factory(new_config.hotkey_accelerator, self._hotkey_toggle,
-                    glib=self.glib, target_at_press=lambda: self.x11.active_window() if self.x11 else None,
-                    on_error=None, on_status=None)
+                if (new_config.hotkey_accelerator != old_config.hotkey_accelerator or
+                        new_config.hotkey_mode != old_config.hotkey_mode):
+                    if new_config.hotkey_mode==old_config.hotkey_mode and hasattr(old_hotkey,"prepare_rebind"):
+                        changed_registration=old_hotkey.prepare_rebind(new_config.hotkey_accelerator)
+                    else:
+                        changed_registration=old_hotkey.prepare_binding(new_config.hotkey_mode,new_config.hotkey_accelerator)
             elif self.x11 is not None:
                 from .hotkey import X11Hotkey
-                new_registration = X11Hotkey(new_config.hotkey_accelerator, self._hotkey_toggle,
+                factory=self.hotkey_factory or X11Hotkey
+                new_registration = factory(new_config.hotkey_accelerator, lambda *_args:None,
                     glib=self.glib, target_at_press=lambda: self.x11.active_window() if self.x11 else None,
-                    on_error=None, on_status=None)
+                    on_error=None, on_status=None, mode=new_config.hotkey_mode,
+                    on_start=lambda _target:None, on_stop=lambda _owner:None,on_invalidate=lambda:None)
         previous_autostart = None
         autostart_changed = False
         try:
@@ -288,13 +339,36 @@ class DesktopEffects:
             if rollback_errors:
                 raise RuntimeError("Не удалось сохранить настройки и отменить одно или несколько изменений") from save_error
             raise
-        if changed_registration and old_hotkey: old_hotkey.commit_rebind()
+        try:
+            if new_registration and hasattr(new_registration,"verify_binding"):
+                new_registration.verify_binding()
+            if changed_registration and old_hotkey:old_hotkey.commit_rebind()
+        except Exception as commit_error:
+            rollback_errors=[]
+            try:saver(old_config)
+            except Exception as error:rollback_errors.append(error)
+            if autostart_changed:
+                try:self.autostart.set_enabled(previous_autostart)
+                except Exception as error:rollback_errors.append(error)
+            if changed_registration and old_hotkey:
+                try:old_hotkey.rollback_rebind()
+                except Exception as error:rollback_errors.append(error)
+            if new_registration:
+                try:new_registration.close()
+                except Exception as error:rollback_errors.append(error)
+            if rollback_errors:raise RuntimeError("Не удалось подтвердить регистрацию клавиши и восстановить настройки") from commit_error
+            raise
         if not new_config.hotkey_enabled and old_hotkey:
             old_hotkey.close(); self.hotkey = None
         elif new_registration:
             self.hotkey = new_registration
-            if hasattr(new_registration,"on_error"): new_registration.on_error=self._hotkey_error
-            if hasattr(new_registration,"on_status"): new_registration.on_status=self._hotkey_status_changed
+            if hasattr(new_registration,"activate"):
+                new_registration.activate(self._hotkey_toggle,on_start=self._push_to_talk_start,
+                    on_stop=self._push_to_talk_stop,on_invalidate=self._invalidate_hold,
+                    on_error=self._hotkey_error,on_status=self._hotkey_status_changed)
+            else:
+                if hasattr(new_registration,"on_error"): new_registration.on_error=self._hotkey_error
+                if hasattr(new_registration,"on_status"): new_registration.on_status=self._hotkey_status_changed
         if not new_config.auto_insert:
             self._cancel_pending_paste()
         self.config = new_config
@@ -303,15 +377,16 @@ class DesktopEffects:
             self.shortcut_status = "Глобальная клавиша отключена"
         elif new_registration:
             self.shortcut_healthy = getattr(new_registration,"healthy",True)
-            self.shortcut_status = ("Глобальная клавиша включена: " + new_config.hotkey_accelerator
+            self.shortcut_status = (self._active_hotkey_status()
                                     if self.shortcut_healthy else "Глобальная клавиша недоступна после изменения раскладки X11")
         elif changed_registration:
-            self.shortcut_healthy = True
-            self.shortcut_status = "Глобальная клавиша включена: " + new_config.hotkey_accelerator
+            self.shortcut_healthy = bool(getattr(old_hotkey,"healthy",True))
+            self.shortcut_status = (self._active_hotkey_status() if self.shortcut_healthy
+                                    else "Глобальная клавиша недоступна после изменения раскладки X11")
         elif old_hotkey:
             self.shortcut_healthy = getattr(old_hotkey,"healthy",self.shortcut_healthy)
-            self.shortcut_status = ("Глобальная клавиша включена: " + new_config.hotkey_accelerator
-                                    if self.shortcut_healthy else "Глобальная клавиша недоступна после изменения раскладки X11")
+            self.shortcut_status = (self._active_hotkey_status() if self.shortcut_healthy
+                                    else "Глобальная клавиша недоступна после изменения раскладки X11")
         else:
             self.shortcut_healthy = False
             self.shortcut_status = "Глобальная клавиша недоступна; выберите другое сочетание в настройках"

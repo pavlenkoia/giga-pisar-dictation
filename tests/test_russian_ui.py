@@ -74,6 +74,66 @@ class RussianUiTests(unittest.TestCase):
         self.assertEqual([(button.label, button.connections[0][2][0]) for button in buttons], expected)
         self.assertTrue(all(button.connections[0][0] == "clicked" for button in buttons))
 
+    def test_push_to_talk_active_and_unavailable_statuses_are_russian(self):
+        from giga_pisar_dictation.desktop import DesktopEffects
+        effects=DesktopEffects.__new__(DesktopEffects)
+        effects.config=type("Config",(),{"hotkey_mode":"push_to_talk","hotkey_accelerator":"Ctrl+a"})()
+        effects.view=type("View",(),{"shortcut_status":Label()})()
+        effects._hotkey_status_changed(True)
+        self.assertEqual(effects.shortcut_status,"Рация — правый Ctrl включена")
+        effects._hotkey_status_changed(False)
+        self.assertEqual(effects.shortcut_status,"Глобальная клавиша недоступна после изменения раскладки X11")
+
+    def test_settings_exposes_russian_modes_disables_accelerator_for_ptt_and_saves_mode(self):
+        from giga_pisar_dictation import gui
+        class Widget:
+            instances=[]
+            def __init__(self,*_args,**kwargs):
+                self.label=kwargs.get("label",""); self.text=""; self.active=False; self.items=[]; self.handlers={}; self.sensitive=True
+                self.__class__.instances.append(self)
+            def set_text(self,value):self.text=value
+            def get_text(self):return self.text
+            def append(self,item_id,label):self.items.append((item_id,label))
+            def set_active_id(self,item_id):self.active_id=item_id
+            def get_active_id(self):return getattr(self,"active_id",None)
+            def set_active(self,value):self.active=value
+            def get_active(self):return self.active
+            def set_sensitive(self,value):self.sensitive=value
+            def connect(self,signal,callback):self.handlers[signal]=callback
+            def set_visibility(self,*_args):pass
+            def set_placeholder_text(self,*_args):pass
+            def set_value(self,value):self.value=value
+            def get_value_as_int(self):return int(getattr(self,"value",120))
+            def attach(self,*_args):pass
+            def add(self,*_args):pass
+            def show_all(self):pass
+            def destroy(self):pass
+        class Dialog(Widget):
+            def __init__(self,**kwargs):super().__init__(**kwargs);self.content=Widget()
+            def add_button(self,*_args):pass
+            def get_content_area(self):return self.content
+            def run(self):
+                mode=next(w for w in Widget.instances if ("Переключение" in [label for _,label in w.items]))
+                mode.active_id="push_to_talk"; mode.handlers["changed"](mode)
+                return 1
+        class Effects:
+            config=type("Config",(),{"base_url":"http://example.invalid","timeout_seconds":120,"audio_source":"","auto_insert":True,"hotkey_enabled":True,"hotkey_accelerator":"Ctrl+a","hotkey_mode":"toggle"})()
+            key="";shortcut_status="Глобальная клавиша включена: Ctrl+a"
+            autostart=type("Autostart",(),{"is_enabled":lambda _self:False})()
+            def __init__(self):self.saved=[]
+            def save_settings(self,*args,**kwargs):self.saved.append((args,kwargs))
+        fake=type("GtkFake",(),{"Dialog":Dialog,"Grid":Widget,"Label":Widget,"Entry":Widget,
+            "ComboBoxText":Widget,"SpinButton":type("Spin",(),{"new_with_range":staticmethod(lambda *_args:Widget())}),
+            "CheckButton":Widget,"ResponseType":type("Response",(),{"CANCEL":0,"OK":1})})
+        effects=Effects();view=gui.DesktopWindow.__new__(gui.DesktopWindow);view.effects=effects;view.window=object();view.status=Widget()
+        Widget.instances=[]
+        with patch.object(gui,"Gtk",fake),patch.object(gui,"list_audio_sources",return_value=[]):view.settings_dialog()
+        mode=next(w for w in Widget.instances if any(label=="Рация — правый Ctrl" for _,label in w.items))
+        accelerator=next(w for w in Widget.instances if w.text=="Ctrl+a")
+        self.assertEqual(mode.items,[ ("toggle","Переключение"),("push_to_talk","Рация — правый Ctrl") ])
+        self.assertFalse(accelerator.sensitive)
+        self.assertEqual(effects.saved[0][1]["hotkey_mode"],"push_to_talk")
+
     def test_indicator_refresh_uses_russian_state_description_and_display_title(self):
         from giga_pisar_dictation import gui
         from giga_pisar_dictation.controller import State

@@ -40,8 +40,12 @@ class ConfigTests(unittest.TestCase):
             os.chmod(d/"config.json",0o600)
             legacy=load_config(d)
             self.assertTrue(legacy.hotkey_enabled); self.assertEqual(legacy.hotkey_accelerator,"Ctrl+Space")
+            self.assertEqual(legacy.hotkey_mode,"toggle")
             with self.assertRaises(ValueError):Config(hotkey_accelerator=42).validate()
             with self.assertRaises(ValueError):Config(hotkey_accelerator="Space").validate()
+            with self.assertRaises(ValueError):Config(hotkey_mode="unknown").validate()
+            ptt=Config(hotkey_mode="push_to_talk",hotkey_accelerator="Ctrl+a")
+            ptt.validate(); self.assertEqual(ptt.hotkey_accelerator,"Ctrl+a")
 
     def test_rejects_permissions_symlinks_unsafe_parent_urls(self):
         with tempfile.TemporaryDirectory() as tmp:

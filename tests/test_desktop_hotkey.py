@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 from giga_pisar_dictation.config import Config
 from giga_pisar_dictation.desktop import DesktopEffects
-from giga_pisar_dictation.controller import State
+from giga_pisar_dictation.controller import Controller, State
 from giga_pisar_dictation.hotkey import X11Hotkey
 from tests.test_hotkey import FakeBackend, FakeGLib
 
@@ -44,6 +44,33 @@ class DesktopSettingsTests(unittest.TestCase):
         effects.view=View(); effects.x11=FakeX(); effects.glib=object(); effects.shortcut_status="old"
         effects.client=None; effects.key=""
         return effects
+    @patch("giga_pisar_dictation.desktop.load_api_key",return_value="")
+    def test_ptt_mode_switch_commits_and_failed_save_rolls_back_actual_binding(self,_):
+        class GLib:
+            IO_IN=1; PRIORITY_DEFAULT=0
+            def io_add_watch(self,*args):return 1
+            def timeout_add(self,*args):return 2
+            def source_remove(self,*args):pass
+        backend=FakeBackend(); glib=GLib()
+        hotkey=X11Hotkey("Ctrl+Space",lambda *_:None,glib=glib,backend=backend)
+        effects=self.make(config=Config(),hotkey=hotkey); effects.glib=glib
+        effects.view.controller=type("Controller",(),{"state":State.IDLE})()
+        effects.config_saver=lambda _config:None
+        effects.save_settings(Config().base_url,120,"","",True,True,"Ctrl+Space",hotkey_mode="push_to_talk")
+        self.assertEqual(hotkey.mode,"push_to_talk")
+        self.assertEqual(backend.grabs,{(105,mask) for mask in range(256)})
+        effects.config_saver=lambda _config:(_ for _ in ()).throw(OSError("disk full"))
+        with self.assertRaises(OSError):
+            effects.save_settings(Config().base_url,120,"","",True,True,"Ctrl+Space",hotkey_mode="toggle")
+        self.assertEqual(effects.config.hotkey_mode,"push_to_talk")
+        self.assertEqual(hotkey.mode,"push_to_talk")
+        self.assertEqual(backend.grabs,{(105,mask) for mask in range(256)})
+        effects.config_saver=lambda _config:None
+        effects.save_settings(Config().base_url,120,"","",True,True,"Ctrl+Space",hotkey_mode="toggle")
+        self.assertEqual(effects.config.hotkey_mode,"toggle")
+        self.assertEqual(backend.grabs,{(65,mask) for mask in (4,6,20,22)})
+        hotkey.close()
+
     @patch("giga_pisar_dictation.desktop.load_api_key",return_value="")
     def test_successful_rebind_disable_enable_and_same_binding(self,_):
         old=Hotkey(); e=self.make(hotkey=old)
@@ -196,6 +223,98 @@ class DesktopSettingsTests(unittest.TestCase):
         self.assertTrue(candidate.closed); self.assertIsNone(e.hotkey)
         self.assertEqual(e.shortcut_status,"Global shortcut disabled")
         self.assertFalse(e.shortcut_healthy)
+    def test_push_to_talk_owns_only_its_recording_generation_and_ignores_stale_release(self):
+        effects=self.make(hotkey=Hotkey())
+        class Controller:
+            state=State.IDLE
+        effects.view.controller=Controller(); effects.recording_generation=10; effects._shutdown=False
+        commands=[]
+        def command(name):
+            commands.append(name)
+            if name=="start":effects.view.controller.state=State.RECORDING
+            return {"ok":True}
+        effects.command=command
+        self.assertEqual(effects._push_to_talk_start(73),10)
+        self.assertEqual(effects.target,73); self.assertEqual(commands,["start"])
+        effects._push_to_talk_stop(9)
+        self.assertEqual(commands,["start"])
+        effects.view.controller.state=State.RECORDING
+        effects._push_to_talk_stop(10)
+        self.assertEqual(commands,["start","stop"])
+        effects._push_to_talk_stop(10)
+        self.assertEqual(commands,["start","stop"])
+
+    def test_push_to_talk_busy_manual_start_error_cancel_and_new_generation(self):
+        effects=self.make(hotkey=Hotkey())
+        class Controller:
+            state=State.REQUESTING
+        effects.view.controller=Controller(); effects.recording_generation=2; effects._shutdown=False
+        effects.target=51; effects._hotkey_target_pending=False
+        commands=[]
+        effects.command=lambda name:(commands.append(name) or {"ok":False})
+        self.assertIsNone(effects._push_to_talk_start(73))
+        self.assertIsNone(getattr(effects,"_push_to_talk_owner",None))
+        self.assertEqual((effects.target,effects._hotkey_target_pending),(51,False))
+        effects.view.controller.state=State.RECORDING
+        self.assertIsNone(effects._push_to_talk_start(99))
+        self.assertEqual((effects.target,effects._hotkey_target_pending),(51,False))
+        effects.view.controller.state=State.IDLE
+        # Busy work completing while held cannot auto-start; a new press is required.
+        effects.view.controller.state=State.IDLE
+        self.assertEqual(commands,["start","start"])
+        def start_command(name):
+            commands.append(name)
+            if name=="start":effects.view.controller.state=State.RECORDING
+            return {"ok":True}
+        effects.command=start_command
+        self.assertEqual(effects._push_to_talk_start(74),2)
+        effects.view.controller.state=State.RECORDING
+        effects._push_to_talk_owner=2
+        effects._invalidate_hold()
+        self.assertIsNone(effects._push_to_talk_owner)
+        self.assertEqual(commands[-1],"cancel")
+        effects.recording_generation=3
+        effects._push_to_talk_stop(2)
+        self.assertNotEqual(commands[-1],"stop")
+
+    def test_real_recording_cancel_audio_error_and_limit_drop_hold_ownership(self):
+        for terminal in ("cancel", "error", "limit"):
+            with self.subTest(terminal=terminal):
+                effects=self.make(hotkey=Hotkey()); effects._shutdown=False
+                effects.recording_generation=5; effects._push_to_talk_owner=5
+                effects.view.controller=Controller(effects); effects.view.controller.state=State.RECORDING
+                effects.limit_source=None; effects.recorder=None; effects.wav=None
+                effects._push_to_talk_stop=lambda _owner:None
+                if terminal=="cancel":effects.view.controller.cancel()
+                elif terminal=="error":effects._audio_error(5)
+                else:effects._recording_limit(5)
+                self.assertIsNone(effects._push_to_talk_owner)
+                self.assertNotEqual(effects.view.controller.state,State.RECORDING)
+
+    def test_push_to_talk_cancel_invalidation_and_shutdown_ignore_stale_generation(self):
+        effects=self.make(hotkey=Hotkey()); effects._shutdown=False; effects.recording_generation=5
+        class Controller:
+            state=State.RECORDING
+        effects.view.controller=Controller(); effects._push_to_talk_owner=5
+        commands=[]
+        effects.command=lambda name:(commands.append(name) or {"ok":True})
+        # Audio error / limit cancellation invalidates the owned generation; a late release is stale.
+        effects._invalidate_hold()
+        self.assertEqual(commands,["cancel"]); self.assertIsNone(effects._push_to_talk_owner)
+        effects._push_to_talk_stop(5); self.assertEqual(commands,["cancel"])
+        effects._shutdown=True
+        self.assertIsNone(effects._push_to_talk_start(91))
+        self.assertEqual(commands,["cancel"])
+
+    def test_mode_change_rejected_while_recording_and_legacy_toggle_binding_is_retained(self):
+        effects=self.make(config=Config(hotkey_mode="toggle",hotkey_accelerator="Ctrl+a"),hotkey=Hotkey())
+        effects.view.controller=type("Controller",(),{"state":State.RECORDING})()
+        with patch("giga_pisar_dictation.desktop.load_api_key",return_value=""):
+            with self.assertRaisesRegex(RuntimeError,"Нельзя менять глобальную клавишу"):
+                effects.save_settings(Config().base_url,120,"","",True,True,"Ctrl+a",hotkey_mode="push_to_talk")
+        self.assertEqual(effects.config.hotkey_mode,"toggle")
+        self.assertEqual(effects.config.hotkey_accelerator,"Ctrl+a")
+
     def test_disabled_config_save_failure_does_not_close_hotkey(self):
         old=Hotkey(); e=self.make(hotkey=old,saver=lambda cfg:(_ for _ in ()).throw(OSError("disk")))
         with patch("giga_pisar_dictation.desktop.load_api_key",return_value=""):
