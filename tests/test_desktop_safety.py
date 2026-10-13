@@ -306,12 +306,36 @@ class SafetyTests(unittest.TestCase):
         x11 = FakeX11(True, clipboard); results = []
         adapter.paste_safely_async("dictation", x11, 42, lambda: False, lambda *r: results.append(r))
         self.assertEqual(x11.paste_calls, [(42, False)])
-        self.assertEqual(clipboard.text, "dictation")
+        self.assertEqual(clipboard.text, "dictation ")
         self.assertEqual(results, [])
         self.assertEqual(timers.delays, [200, 200, 300])
         timers.last_callback()()
         self.assertEqual(clipboard.text, "previous text")
         self.assertEqual(results, [(True, None)])
+
+    def test_auto_paste_empty_text_is_not_written_or_pasted(self):
+        clipboard = FakeClipboard("previous")
+        adapter = GtkClipboardAdapter(clipboard)
+        x11 = FakeX11(True, clipboard)
+        results = []
+        adapter.paste_safely_async("", x11, 42, False, lambda *r: results.append(r))
+        self.assertEqual(clipboard.text, "previous")
+        self.assertEqual(x11.paste_calls, [])
+        self.assertEqual(results, [(False, "Нет текста для вставки")])
+
+    def test_auto_paste_appends_exactly_one_space_and_confirms_final_text(self):
+        for source, expected in (("dictation", "dictation "), ("already ", "already  "),
+                                 ("line\n", "line\n ")):
+            with self.subTest(source=source):
+                clipboard = FakeClipboard("previous")
+                timers = FakeTimers()
+                adapter = GtkClipboardAdapter(clipboard, scheduler=timers.schedule, cancel_timer=timers.cancel)
+                x11 = FakeX11(True, clipboard)
+                adapter.paste_safely_async(source, x11, 42, False, lambda *_: None)
+                self.assertEqual(clipboard.text, expected)
+                self.assertEqual(adapter._paste["text"], expected)
+                timers.last_callback()()
+                self.assertEqual(clipboard.text, "previous")
 
     def test_auto_paste_restores_image_or_clears_when_no_snapshot(self):
         for snapshot in ("image", "none"):
@@ -347,7 +371,7 @@ class SafetyTests(unittest.TestCase):
         clipboard = FakeClipboard("previous")
         timers = FakeTimers()
         pending_text, pending_image = [], []
-        clipboard.request_text = lambda callback, data: pending_text.append((callback, data)) if not clipboard.text == "dictation" else callback(clipboard, clipboard.text, data)
+        clipboard.request_text = lambda callback, data: pending_text.append((callback, data)) if not clipboard.text == "dictation " else callback(clipboard, clipboard.text, data)
         clipboard.request_image = lambda callback, data: pending_image.append((callback, data))
         adapter = GtkClipboardAdapter(clipboard, scheduler=timers.schedule, cancel_timer=timers.cancel)
         x11 = FakeX11(True, clipboard)
@@ -376,7 +400,7 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(len(confirmations), 1)
         self.assertTrue(adapter.copy_text("explicit copy"))
         callback, data = confirmations[0]
-        callback(clipboard, "dictation", data)
+        callback(clipboard, data["text"], data)
         self.assertEqual(x11.paste_calls, [])
         self.assertEqual(clipboard.text, "explicit copy")
 
@@ -400,7 +424,7 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(len(restore_requests), 1)
         self.assertTrue(adapter.copy_text("explicit copy"))
         callback, data = restore_requests[0]
-        callback(clipboard, "dictation", data)
+        callback(clipboard, data[0]["text"], data)
         self.assertEqual(clipboard.text, "explicit copy")
 
     def test_snapshot_failure_does_not_block_paste_and_external_change_is_not_restored(self):

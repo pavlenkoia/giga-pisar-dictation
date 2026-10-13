@@ -301,6 +301,7 @@ class GtkClipboardAdapter:
         if not isinstance(text, str) or not text:
             self._notify(callback, False, "Нет текста для вставки")
             return
+        text += " "
         operation = {"token": token, "text": text, "x11": x11, "window": target_window,
                      "modifiers": modifiers_down, "callback": callback, "snapshot": None,
                      "initial_owner": self._owner_generation, "installed": False,
