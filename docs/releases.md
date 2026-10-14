@@ -4,9 +4,9 @@
 
 Если выпуск с таким тегом уже существует, публикация останавливается без перезаписи. Для исправленного пакета нужна новая версия и новый тег.
 
-## Локальная подготовка версии 0.2.11
+## Выпуск v0.2.11
 
-Локально подготовлено удаление HTTP-предупреждения из результата проверки доступности сервера; fake-регрессии покрывают HTTP/HTTPS и отсутствие клиента. Версия в `pyproject.toml` установлена в 0.2.11. Это ещё не опубликованный кандидат: тег и публичный выпуск не созданы.
+[Выпуск v0.2.11](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.11) опубликован с commit `96191ad`: из проверки доступности сервера убрано HTTP-предупреждение без проверки схемы URL. Успех, ошибки и инструкция задать ключ сохранены. Основной агент независимо подтвердил 178 тестов, compileall, CLI help, diff-check, сборку, strict release validator, desktop-file validation, lintian policy, extracted launcher help и checksum. Свежий read-only reviewer — OK, замечаний нет; команды reviewer не повторял. [GitHub Actions 38553579853](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/38553579853): build-and-test и publish — success. Опубликованные `.deb` и `SHA256SUMS` скачаны и проверены по checksum и strict release validator. Реальная GTK/X11-приёмка и установка не выполнялись. CI сообщил известное предупреждение о Node.js 20 в закреплённых actions; исполнение шло на Node.js 24. Ветка `fix/remove-health-http-warning` опубликована, merge в main не выполнялся.
 
 ## Выпуск v0.2.10
 
@@ -70,11 +70,11 @@
 
 ## Скачать и установить
 
-Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.10:
+Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.11:
 
 ```sh
 sha256sum --check --strict SHA256SUMS
-sudo apt install ./giga-pisar-dictation_0.2.10_amd64.deb
+sudo apt install ./giga-pisar-dictation_0.2.11_amd64.deb
 ```
 
 Устанавливайте пакет только после успешной проверки. Репозитория APT и автоматических обновлений нет: новые версии нужно скачивать и устанавливать вручную.

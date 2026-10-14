@@ -81,7 +81,7 @@ Fake-clock regressions проверяют ненулевой baseline 10 000 000
 
 ## Проверка доступности сервера без HTTP-предупреждения (2026-10-14)
 
-`DesktopEffects.health` сохраняет health-запрос и сообщает «Сервер доступен» при успехе, `str(error)` при ошибке и нейтральную инструкцию задать ключ, если клиент отсутствует. Обработчик не ветвится по схеме URL. Fake-регрессии покрывают успех и ошибку при HTTP/HTTPS, а также отсутствие клиента; сеть и ключи не используются. `PYTHONPATH=src /usr/bin/python3 -m unittest discover -s tests -v` — 178 tests passed; `/usr/bin/python3 -m compileall -q src tests scripts` и `git diff --check` — passed. Изменение подготовлено как версия 0.2.11 и ещё не опубликовано.
+`DesktopEffects.health` сохраняет health-запрос и сообщает «Сервер доступен» при успехе, `str(error)` при ошибке и нейтральную инструкцию задать ключ, если клиент отсутствует. Обработчик не ветвится по схеме URL. Fake-регрессии покрывают успех и ошибку при HTTP/HTTPS, а также отсутствие клиента; сеть и ключи не используются. `PYTHONPATH=src /usr/bin/python3 -m unittest discover -s tests -v` — 178 tests passed; `/usr/bin/python3 -m compileall -q src tests scripts` и `git diff --check` — passed. Основной агент независимо повторил 178 тестов, compileall и diff-check, проверил CLI help и пакет; свежий read-only review — OK. Изменение опубликовано в [v0.2.11](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.11); CI build-and-test/publish и проверка скачанных assets прошли. Реальная GTK/X11-приёмка и установка не выполнялись. Подробности — в releases.md.
 
 ## Встроенная горячая клавиша (2026-10-09)
 
