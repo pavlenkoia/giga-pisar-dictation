@@ -192,20 +192,117 @@ class View:
     def modifiers_down(self): return False
 
 
-def make_effects(directory, glib=None):
+class FakeClock:
+    def __init__(self, now_ns=10_000_000_000): self.now_ns = now_ns
+    def __call__(self): return self.now_ns
+    def advance_ns(self, delta_ns): self.now_ns += delta_ns
+
+
+def make_effects(directory, glib=None, monotonic_clock_ns=None, recorder_factory=None):
     directory.mkdir(mode=0o700, exist_ok=True)
     FakeThread.instances.clear(); events = []
     view = View(); client = FakeClient(); glib = glib or FakeGLib()
     effects = DesktopEffects(view, config=Config(auto_insert=False, hotkey_enabled=False), key="fictional-test-key", client=client,
-        audio_directory=directory, recorder_factory=FakeRecorder,
+        audio_directory=directory, recorder_factory=recorder_factory or FakeRecorder,
         clipboard=FakeClipboard(events), x11_factory=lambda: FakeX11(events),
-        glib=glib, thread_factory=FakeThread)
+        glib=glib, thread_factory=FakeThread,
+        monotonic_clock_ns=monotonic_clock_ns or FakeClock())
     view.controller = Controller(effects)
     effects.view = view
     return effects, view, client, glib, events
 
 
 class DesktopRecordingTests(unittest.TestCase):
+    def test_ptt_minimum_hold_fake_clock_cancels_short_and_stops_at_threshold(self):
+        for duration_ns, expected in ((699_000_000, "cancel"),
+                                      (700_000_000, "stop"),
+                                      (900_000_000, "stop")):
+            with self.subTest(duration_ns=duration_ns), tempfile.TemporaryDirectory() as tmp:
+                clock = FakeClock()
+                effects, view, client, glib, _ = make_effects(
+                    Path(tmp) / "audio", monotonic_clock_ns=clock)
+                owner = effects._push_to_talk_start(73)
+                wav = effects.wav.path
+                clock.advance_ns(duration_ns)
+                effects._push_to_talk_stop(owner)
+                first_tail = effects._ptt_tail_source
+                effects._push_to_talk_stop(owner)  # Duplicate release is inert.
+                self.assertEqual(effects._ptt_tail_source, first_tail)
+                self.assertEqual(view.controller.state, State.RECORDING)
+                self.assertEqual(client.calls, [])
+                glib.timers[first_tail]()
+                if expected == "cancel":
+                    self.assertEqual(view.controller.state, State.IDLE)
+                    self.assertFalse(wav.exists())
+                    self.assertEqual(client.calls, [])
+                else:
+                    self.assertEqual(view.controller.state, State.FINALIZING)
+                    self.assertTrue(wav.exists())
+                    self.assertEqual(client.calls, [])
+
+    def test_ptt_repeat_press_sums_holds_only_and_ignores_stale_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            clock = FakeClock()
+            effects, view, client, glib, _ = make_effects(
+                Path(tmp) / "audio", monotonic_clock_ns=clock)
+            owner = effects._push_to_talk_start(73)
+            clock.advance_ns(400_000_000)
+            effects._push_to_talk_stop(owner)
+            first_tail = effects._ptt_tail_source
+            clock.advance_ns(200_000_000)  # Tail time does not count.
+            self.assertEqual(effects._push_to_talk_start(73), owner)
+            self.assertIn(first_tail, glib.removed)
+            # Gate dispatches releases synchronously and suppresses duplicates until a new press.
+            self.assertEqual(effects._ptt_hold_started_ns, clock())
+            clock.advance_ns(200_000_000)
+            effects._push_to_talk_stop(owner)
+            self.assertEqual(effects._ptt_hold_total_ns, 600_000_000)
+            clock.advance_ns(300_000_000)  # Second tail is excluded as well.
+            glib.timers[effects._ptt_tail_source]()
+            self.assertEqual(view.controller.state, State.IDLE)
+            self.assertFalse(effects.wav.path.exists())
+            self.assertEqual(client.calls, [])
+
+    def test_ptt_keydown_timestamp_precedes_delayed_recorder_start(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            clock = FakeClock()
+            def slow_recorder(*args):
+                clock.advance_ns(200_000_000)
+                return FakeRecorder(*args)
+            effects, view, client, glib, _ = make_effects(
+                Path(tmp) / "audio", monotonic_clock_ns=clock,
+                recorder_factory=slow_recorder)
+            accepted_at = clock()
+            owner = effects._push_to_talk_start(73)
+            self.assertEqual(effects._ptt_hold_started_ns, accepted_at)
+            clock.advance_ns(500_000_000)
+            effects._push_to_talk_stop(owner)
+            glib.timers[effects._ptt_tail_source]()
+            self.assertEqual(view.controller.state, State.FINALIZING)
+            self.assertEqual(client.calls, [])
+
+    def test_ptt_holds_across_tail_total_exactly_threshold_submit_after_tail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            clock = FakeClock()
+            effects, view, client, glib, _ = make_effects(
+                Path(tmp) / "audio", monotonic_clock_ns=clock)
+            owner = effects._push_to_talk_start(73)
+            clock.advance_ns(350_000_000)
+            effects._push_to_talk_stop(owner)
+            clock.advance_ns(100_000_000)
+            self.assertEqual(effects._push_to_talk_start(73), owner)
+            clock.advance_ns(350_000_000)
+            effects._push_to_talk_stop(owner)
+            self.assertEqual(effects._ptt_hold_total_ns, 700_000_000)
+            self.assertEqual(view.controller.state, State.RECORDING)
+            self.assertEqual(client.calls, [])
+            clock.advance_ns(300_000_000)
+            glib.timers[effects._ptt_tail_source]()
+            self.assertEqual(view.controller.state, State.FINALIZING)
+            FakeThread.instances[-1].run(); glib.idle.pop()()
+            self.assertEqual(view.controller.state, State.REQUESTING)
+            self.assertEqual(len(client.calls), 1)
+
     def test_five_minute_limit_discards_without_request(self):
         with tempfile.TemporaryDirectory() as tmp:
             effects, view, client, glib, _ = make_effects(Path(tmp) / "audio")
@@ -266,6 +363,7 @@ class DesktopRecordingTests(unittest.TestCase):
             effects, view, client, glib, _ = make_effects(Path(tmp) / "audio")
             self.assertTrue(view.controller.start())
             owner=effects.recording_generation; effects._push_to_talk_owner=owner
+            effects._ptt_hold_started_ns=effects.monotonic_clock_ns()-700_000_000
             effects._push_to_talk_stop(owner)
             self.assertEqual(glib.milliseconds,300)
             self.assertEqual(view.controller.state,State.RECORDING)
@@ -310,12 +408,17 @@ class DesktopRecordingTests(unittest.TestCase):
             effects, view, _client, glib, _ = make_effects(Path(tmp) / "audio")
             self.assertTrue(view.controller.start())
             owner=effects.recording_generation; effects._push_to_talk_owner=owner
+            effects._ptt_hold_started_ns=effects.monotonic_clock_ns()-700_000_000
             effects._push_to_talk_stop(owner); old_source=effects._ptt_tail_source
+            stale_tail=glib.timers[old_source]
             self.assertEqual(effects._push_to_talk_start(42),owner)
             self.assertIn(old_source,glib.removed)
             self.assertEqual(view.controller.state,State.RECORDING)
             self.assertIsNone(effects._ptt_tail_owner)
             self.assertEqual(glib.timers.get(old_source),None)
+            stale_tail()
+            self.assertEqual(view.controller.state,State.RECORDING)
+            self.assertEqual(effects._push_to_talk_owner,owner)
             effects._push_to_talk_stop(owner)
             self.assertEqual(glib.milliseconds,300)
             effects.command("cancel")
@@ -326,6 +429,7 @@ class DesktopRecordingTests(unittest.TestCase):
                 effects, view, _client, glib, _ = make_effects(Path(tmp) / "audio")
                 self.assertTrue(view.controller.start())
                 owner=effects.recording_generation; effects._push_to_talk_owner=owner
+                effects._ptt_hold_started_ns=effects.monotonic_clock_ns()-700_000_000
                 effects._push_to_talk_stop(owner); callback=glib.timers[effects._ptt_tail_source]
                 if terminal=="cancel":view.controller.cancel()
                 elif terminal=="error":effects._audio_error(owner)
@@ -336,6 +440,43 @@ class DesktopRecordingTests(unittest.TestCase):
                 if terminal=="generation":self.assertEqual(view.controller.state,State.RECORDING)
                 else:self.assertNotEqual(view.controller.state,State.FINALIZING)
                 self.assertNotEqual(view.controller.state,State.REQUESTING)
+
+    def test_ptt_terminal_paths_do_not_carry_hold_time_into_new_generation(self):
+        for terminal in ("cancel", "error", "limit"):
+            with self.subTest(terminal=terminal), tempfile.TemporaryDirectory() as tmp:
+                clock = FakeClock()
+                effects, view, client, glib, _ = make_effects(
+                    Path(tmp) / "audio", monotonic_clock_ns=clock)
+                old_owner = effects._push_to_talk_start(73)
+                clock.advance_ns(400_000_000)
+                effects._push_to_talk_stop(old_owner)
+                stale_tail = glib.timers[effects._ptt_tail_source]
+                if terminal == "cancel":
+                    view.controller.cancel()
+                elif terminal == "error":
+                    effects._audio_error(old_owner)
+                else:
+                    effects._recording_limit(old_owner)
+                stale_tail()
+                self.assertNotEqual(view.controller.state, State.RECORDING)
+                self.assertEqual(effects._ptt_hold_total_ns, 0)
+                new_owner = effects._push_to_talk_start(73)
+                self.assertNotEqual(new_owner, old_owner)
+                clock.advance_ns(699_999_999)
+                effects._push_to_talk_stop(new_owner)
+                glib.timers[effects._ptt_tail_source]()
+                self.assertEqual(view.controller.state, State.IDLE)
+                self.assertEqual(client.calls, [])
+
+    def test_ptt_shutdown_clears_hold_accounting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            effects, _view, _client, _glib, _events = make_effects(Path(tmp) / "audio")
+            owner = effects._push_to_talk_start(73)
+            effects._ptt_hold_total_ns = 123_000_000
+            effects._push_to_talk_stop(owner)
+            effects.shutdown()
+            self.assertEqual(effects._ptt_hold_total_ns, 0)
+            self.assertIsNone(effects._ptt_hold_started_ns)
 
     def test_shutdown_during_finalization_discards_late_completion(self):
         with tempfile.TemporaryDirectory() as tmp:

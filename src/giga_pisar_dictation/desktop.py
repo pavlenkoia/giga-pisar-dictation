@@ -2,6 +2,7 @@
 from __future__ import annotations
 import threading
 import os
+import time
 from dataclasses import replace
 import gi
 gi.require_version("GLib", "2.0"); gi.require_version("Gio", "2.0")
@@ -16,12 +17,15 @@ from .x11 import X11Adapter
 
 class DesktopEffects:
     PTT_RELEASE_TAIL_MS = 300
+    PTT_MINIMUM_HOLD_NS = 700_000_000
     def __init__(self, view, *, config=None, key=None, client=None, audio_directory=None,
                  wav_factory=PrivateWav, recorder_factory=GstRecorder, clipboard=None,
                  x11_factory=X11Adapter, glib=GLib, thread_factory=threading.Thread,
-                 hotkey_factory=None, config_saver=None, key_saver=None, autostart_store=None):
+                 hotkey_factory=None, config_saver=None, key_saver=None, autostart_store=None,
+                 monotonic_clock_ns=time.monotonic_ns):
         self.view = view
         self.glib, self.thread_factory = glib, thread_factory
+        self.monotonic_clock_ns = monotonic_clock_ns
         self.hotkey_factory = hotkey_factory
         self.config_saver, self.key_saver = config_saver, key_saver
         from .autostart import AutostartFile
@@ -90,9 +94,14 @@ class DesktopEffects:
         self._invalidate_hold()
         self._hotkey_status_changed(False)
 
+    def _clear_ptt_hold(self):
+        self._ptt_hold_started_ns = None
+        self._ptt_hold_total_ns = 0
+
     def _invalidate_hold(self):
         owner=getattr(self,"_push_to_talk_owner",None)
         self._push_to_talk_owner=None
+        self._clear_ptt_hold()
         controller=getattr(self.view,"controller",None)
         if (owner is not None and owner==getattr(self,"recording_generation",None) and
                 controller is not None and controller.state==State.RECORDING and not self._shutdown):
@@ -100,10 +109,12 @@ class DesktopEffects:
 
     def _push_to_talk_start(self, target):
         if self._shutdown:return None
+        accepted_at_ns = self.monotonic_clock_ns()
         pending_owner=getattr(self,"_ptt_tail_owner",None)
         if (pending_owner is not None and pending_owner==self.recording_generation and
                 self.view.controller.state==State.RECORDING):
             self._cancel_ptt_tail()
+            self._ptt_hold_started_ns = accepted_at_ns
             return pending_owner
         previous_target=getattr(self,"target",None)
         previous_pending=getattr(self,"_hotkey_target_pending",False)
@@ -116,11 +127,19 @@ class DesktopEffects:
             return None
         owner=self.recording_generation
         self._push_to_talk_owner=owner
+        self._ptt_hold_total_ns=0
+        self._ptt_hold_started_ns=accepted_at_ns
         return owner
 
     def _push_to_talk_stop(self, owner):
         if (owner is None or owner!=getattr(self,"_push_to_talk_owner",None) or
-                owner!=self.recording_generation or self.view.controller.state!=State.RECORDING):return
+                owner!=self.recording_generation or self.view.controller.state!=State.RECORDING or
+                getattr(self, "_ptt_hold_started_ns", None) is None):return
+        released_at_ns = self.monotonic_clock_ns()
+        started_at_ns = self._ptt_hold_started_ns
+        if started_at_ns is not None:
+            self._ptt_hold_total_ns = getattr(self, "_ptt_hold_total_ns", 0) + max(0, released_at_ns - started_at_ns)
+            self._ptt_hold_started_ns = None
         self._cancel_ptt_tail()
         token=getattr(self,"_ptt_tail_token",0)+1
         self._ptt_tail_token=token
@@ -133,7 +152,9 @@ class DesktopEffects:
                     self.view.controller.state!=State.RECORDING):
                 return GLib.SOURCE_REMOVE
             self._push_to_talk_owner=None
-            self.command("stop")
+            held_ns = getattr(self, "_ptt_hold_total_ns", 0)
+            self._clear_ptt_hold()
+            self.command("stop" if held_ns >= self.PTT_MINIMUM_HOLD_NS else "cancel")
             return GLib.SOURCE_REMOVE
         self._ptt_tail_source=self.glib.timeout_add(self.PTT_RELEASE_TAIL_MS,finish_tail)
 
@@ -184,6 +205,7 @@ class DesktopEffects:
         if generation == self.recording_generation and self.view.controller.state == State.RECORDING:
             self._cancel_ptt_tail()
             self._push_to_talk_owner=None
+            self._clear_ptt_hold()
             self.view.controller.fail("Ошибка аудиоустройства или файла")
             self.view.refresh()
 
@@ -191,6 +213,7 @@ class DesktopEffects:
         if generation == self.recording_generation and self.view.controller.state == State.RECORDING:
             self._cancel_ptt_tail()
             self._push_to_talk_owner=None
+            self._clear_ptt_hold()
             self.view.controller.cancel()
             self.view.refresh()
             self.view.status.set_text("Достигнут лимит записи в пять минут; аудио удалено")
@@ -212,6 +235,7 @@ class DesktopEffects:
                     return GLib.SOURCE_REMOVE
                 if error:
                     self._push_to_talk_owner=None
+                    self._clear_ptt_hold()
                     self.view.controller.fail("Не удалось завершить запись аудио")
                 else: self.view.controller.audio_finalized(valid)
                 self.view.refresh()
@@ -222,6 +246,7 @@ class DesktopEffects:
     def cancel_recording(self):
         self._cancel_ptt_tail()
         self._push_to_talk_owner=None
+        self._clear_ptt_hold()
         if getattr(self, "limit_source", None):
             self.glib.source_remove(self.limit_source); self.limit_source = None
         if self.recorder:
@@ -290,6 +315,7 @@ class DesktopEffects:
     def remove_audio(self):
         self.recording_generation = getattr(self, "recording_generation", 0) + 1
         self._invalidate_hold()
+        self._clear_ptt_hold()
         if self.recorder:
             try: self.recorder.cancel()
             except Exception: pass

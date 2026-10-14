@@ -42,6 +42,7 @@ class DesktopSettingsTests(unittest.TestCase):
         effects.shortcut_healthy=getattr(hotkey,"healthy",bool(hotkey))
         effects.config_saver=saver or (lambda cfg:None); effects.key_saver=lambda key:None
         effects.view=View(); effects.x11=FakeX(); effects.glib=object(); effects.shortcut_status="old"
+        effects.monotonic_clock_ns=lambda:10_000_000_000
         effects.client=None; effects.key=""
         return effects
     @patch("giga_pisar_dictation.desktop.load_api_key",return_value="")
@@ -259,6 +260,7 @@ class DesktopSettingsTests(unittest.TestCase):
         class Controller:
             state=State.IDLE
         effects.view.controller=Controller(); effects.recording_generation=10; effects._shutdown=False
+        clock=[10_000_000_000]; effects.monotonic_clock_ns=lambda:clock[0]
         commands=[]
         def command(name):
             commands.append(name)
@@ -271,6 +273,7 @@ class DesktopSettingsTests(unittest.TestCase):
         effects._push_to_talk_stop(9)
         self.assertEqual(commands,["start"])
         effects.view.controller.state=State.RECORDING
+        clock[0]=10_700_000_000
         effects._push_to_talk_stop(10)
         self.assertEqual(commands,["start"])
         effects.glib.timers[next(reversed(effects.glib.timers))]()
@@ -316,6 +319,7 @@ class DesktopSettingsTests(unittest.TestCase):
             with self.subTest(terminal=terminal):
                 effects=self.make(hotkey=Hotkey()); effects._shutdown=False
                 effects.recording_generation=5; effects._push_to_talk_owner=5
+                effects._ptt_hold_total_ns=250_000_000; effects._ptt_hold_started_ns=10_000_000_000
                 effects.view.controller=Controller(effects); effects.view.controller.state=State.RECORDING
                 effects.limit_source=None; effects.recorder=None; effects.wav=None
                 effects._push_to_talk_stop=lambda _owner:None
@@ -323,6 +327,8 @@ class DesktopSettingsTests(unittest.TestCase):
                 elif terminal=="error":effects._audio_error(5)
                 else:effects._recording_limit(5)
                 self.assertIsNone(effects._push_to_talk_owner)
+                self.assertEqual(effects._ptt_hold_total_ns,0)
+                self.assertIsNone(effects._ptt_hold_started_ns)
                 self.assertNotEqual(effects.view.controller.state,State.RECORDING)
 
     def test_push_to_talk_cancel_invalidation_and_shutdown_ignore_stale_generation(self):
