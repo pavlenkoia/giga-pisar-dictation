@@ -4,6 +4,10 @@
 
 Если выпуск с таким тегом уже существует, публикация останавливается без перезаписи. Для исправленного пакета нужна новая версия и новый тег.
 
+## Выпуск v0.2.10
+
+[Выпуск v0.2.10](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.10) опубликован с commit `ea17c5e`: в режиме «Рация» суммарное удержание правого Ctrl меньше 700 мс отменяет запись без отправки и ошибки; хвост 300 мс и паузы не учитываются. Повторные удержания одной записи суммируются целыми наносекундами. [GitHub Actions 38535357919](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/38535357919): build-and-test и publish — success. Опубликованные `.deb` и `SHA256SUMS` скачаны; checksum и strict release validator прошли. SHA256 `.deb`: `1668d2808c18e9e7c5206699fb697b6e46034756dcea8c6d64c0cdc3a1c2bc55`. Локально независимо прошли 175 тестов, compileall, CLI help, desktop-file validation, strict package validator, lintian policy, extracted launcher help и checksum. Финальные review реализации и release-метаданных — OK. Реальная GTK/X11-приёмка и установка не выполнялись. CI сообщил известное предупреждение о Node.js 20 в закреплённых actions; исполнение шло на Node.js 24.
+
 ## Выпуск v0.2.9
 
 [Выпуск v0.2.9](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.9) опубликован с commit `894b901`: нерелевантные MappingNotify больше не сбрасывают обработчик правого Ctrl; сохранены инвалидация при ошибке mapping, восстановление binding и защита prepared candidate при смене mapping туда/обратно. [GitHub Actions 38435175707](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/38435175707): build-and-test и publish — success. `.deb` и `SHA256SUMS` скачаны; checksum и strict release validator прошли. SHA256 `.deb`: `2404cf38d4fad69799b659a36486b545791384022884b75db5b972844b647c44`. Локально независимо прошли 169 тестов, compileall, CLI help, desktop-file validation, сборка, lintian policy, extracted launcher help и checksum. Финальный review реализации и release-метаданных — OK. Связь исправленного fake-дефекта с пропуском после живой вставки не подтверждена; GTK/X11-приёмка и установка не выполнялись. CI сообщил известное предупреждение о Node.js 20 в закреплённых actions; выполнение шло на Node.js 24.
@@ -62,11 +66,11 @@
 
 ## Скачать и установить
 
-Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.9:
+Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.10:
 
 ```sh
 sha256sum --check --strict SHA256SUMS
-sudo apt install ./giga-pisar-dictation_0.2.9_amd64.deb
+sudo apt install ./giga-pisar-dictation_0.2.10_amd64.deb
 ```
 
 Устанавливайте пакет только после успешной проверки. Репозитория APT и автоматических обновлений нет: новые версии нужно скачивать и устанавливать вручную.
