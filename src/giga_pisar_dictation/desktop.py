@@ -330,11 +330,10 @@ class DesktopEffects:
 
     def health(self):
         if not self.client:
-            self.view.status.set_text("ПРЕДУПРЕЖДЕНИЕ: HTTP допускается только в доверенной локальной сети; задайте ключ для проверки сервера")
+            self.view.status.set_text("Задайте ключ для проверки сервера")
             return
         self.client.health_async(lambda data, error: self.view.status.set_text(
-            "ПРЕДУПРЕЖДЕНИЕ: HTTP не зашифрован; сервер доступен" if not error else
-            "ПРЕДУПРЕЖДЕНИЕ: HTTP не зашифрован; " + str(error)))
+            "Сервер доступен" if not error else str(error)))
 
     def save_settings(self, url, timeout, source, key, auto_insert, hotkey_enabled=True,
                       hotkey_accelerator="Ctrl+Space", autostart_enabled=None, hotkey_mode=None):

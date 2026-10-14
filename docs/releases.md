@@ -4,6 +4,10 @@
 
 Если выпуск с таким тегом уже существует, публикация останавливается без перезаписи. Для исправленного пакета нужна новая версия и новый тег.
 
+## Локальная подготовка версии 0.2.11
+
+Локально подготовлено удаление HTTP-предупреждения из результата проверки доступности сервера; fake-регрессии покрывают HTTP/HTTPS и отсутствие клиента. Версия в `pyproject.toml` установлена в 0.2.11. Это ещё не опубликованный кандидат: тег и публичный выпуск не созданы.
+
 ## Выпуск v0.2.10
 
 [Выпуск v0.2.10](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.10) опубликован с commit `ea17c5e`: в режиме «Рация» суммарное удержание правого Ctrl меньше 700 мс отменяет запись без отправки и ошибки; хвост 300 мс и паузы не учитываются. Повторные удержания одной записи суммируются целыми наносекундами. [GitHub Actions 38535357919](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/38535357919): build-and-test и publish — success. Опубликованные `.deb` и `SHA256SUMS` скачаны; checksum и strict release validator прошли. SHA256 `.deb`: `1668d2808c18e9e7c5206699fb697b6e46034756dcea8c6d64c0cdc3a1c2bc55`. Локально независимо прошли 175 тестов, compileall, CLI help, desktop-file validation, strict package validator, lintian policy, extracted launcher help и checksum. Финальные review реализации и release-метаданных — OK. Реальная GTK/X11-приёмка и установка не выполнялись. CI сообщил известное предупреждение о Node.js 20 в закреплённых actions; исполнение шло на Node.js 24.
