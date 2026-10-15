@@ -2,9 +2,9 @@
 
 После отправки тега `vX.Y.Z` GitHub Actions проверяет отмеченный коммит, собирает один пакет `.deb` для amd64 и публикует его вместе с `SHA256SUMS` в GitHub Releases. Версия в `pyproject.toml`, метаданные пакета и тег должны совпадать.
 
-## Подготовка выпуска 0.2.12
+## Выпуск v0.2.12
 
-Для 0.2.12 подготовлены версия и запись changelog об упрощении описания Debian-пакета; поведение приложения не меняется. Сборка, проверки и публикация выпуска ещё не подтверждены.
+[Выпуск v0.2.12](https://github.com/pavlenkoia/giga-pisar-dictation/releases/tag/v0.2.12) опубликован с commit `ec4f05e`, влитым в `main`: из описания Debian-пакета удалено уточнение о доверенной локальной сети; поведение приложения не меняется. Основной агент независимо проверил diff, локальную сборку, strict release validator, Version и Description; свежий read-only reviewer — OK, замечаний нет (команды не повторял). [GitHub Actions 38700297658](https://github.com/pavlenkoia/giga-pisar-dictation/actions/runs/38700297658): build-and-test (178 тестов и проверки пакета) и publish — success. Опубликованные `.deb` и `SHA256SUMS` скачаны: checksum, strict release validator, версия 0.2.12 и Description «Клиент Linux для распознавания речи.» подтверждены. Установка и GTK/X11-приёмка не выполнялись. CI сообщил известное предупреждение о Node.js 20 в закреплённых actions; исполнение шло на Node.js 24.
 
 Если выпуск с таким тегом уже существует, публикация останавливается без перезаписи. Для исправленного пакета нужна новая версия и новый тег.
 
@@ -74,11 +74,11 @@
 
 ## Скачать и установить
 
-Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.11:
+Скачайте пакет и `SHA256SUMS` из [GitHub Releases](https://github.com/pavlenkoia/giga-pisar-dictation/releases) в один каталог. Для выпуска 0.2.12:
 
 ```sh
 sha256sum --check --strict SHA256SUMS
-sudo apt install ./giga-pisar-dictation_0.2.11_amd64.deb
+sudo apt install ./giga-pisar-dictation_0.2.12_amd64.deb
 ```
 
 Устанавливайте пакет только после успешной проверки. Репозитория APT и автоматических обновлений нет: новые версии нужно скачивать и устанавливать вручную.
